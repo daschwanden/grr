@@ -69,7 +69,7 @@ ENV GRR_SOURCE /usr/src/grr
 RUN python -m venv --system-site-packages $VIRTUAL_ENV
 ENV PATH=${VIRTUAL_ENV}/bin:${PATH}
 
-RUN ${VIRTUAL_ENV}/bin/python -m pip install wheel nodeenv grpcio-tools==1.60
+RUN ${VIRTUAL_ENV}/bin/python -m pip install wheel nodeenv grpcio-tools==1.60 google-cloud-storage==2.16.0
 
 RUN ${VIRTUAL_ENV}/bin/nodeenv -p --prebuilt --node=16.13.0
 
