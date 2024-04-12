@@ -197,14 +197,15 @@ class TestMysqlDB(stats_test_lib.StatsTestMixin,
   def testPrunings(self):
 
     def ProcessPrunings(con):
-      to_process = ListPruningsToProcess(config.CONFIG["Mysql.prunings_dir"])
+      prunings_root = config.CONFIG["Mysql.prunings_dir"]
+      to_process = ListPruningsToProcess(prunings_root)
       logging.info("Will execute following DB prunings: %s",
                    ", ".join(to_process))
 
       for fname in to_process:
         start_time = time.time()
         logging.info("Starting pruning %s", fname)
-        with open(os.path.join(migrations_root, fname)) as fd:
+        with open(os.path.join(prunings_root, fname)) as fd:
           sql = fd.read()
           with contextlib.closing(con.cursor()) as cursor:
             cursor.execute(sql)
@@ -212,8 +213,7 @@ class TestMysqlDB(stats_test_lib.StatsTestMixin,
         logging.info("Pruning %s is done. Took %.2fs", fname,
                      time.time() - start_time)
 
-    self.db.delegate._RunInTransaction(SetMaxAllowedPacket)
-
+    self.db.delegate._RunInTransaction(ProcessPrunings)
 
   def testRunInTransaction(self):
 
