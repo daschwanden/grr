@@ -54,6 +54,10 @@ config_lib.DEFINE_string(
     "Mysql.migrations_dir", "%(grr_response_server/databases/mysql_migrations@"
     "grr-response-server|resource)", "Folder with MySQL migrations files.")
 
+config_lib.DEFINE_string(
+    "Mysql.prunings_dir", "%(grr_response_server/databases/mysql_prunings@"
+    "grr-response-server|resource)", "Folder with MySQL pruning files.")
+
 # Support for MySQL SSL connections.
 
 config_lib.DEFINE_string(

@@ -14,6 +14,7 @@ from absl.testing import absltest
 import MySQLdb  # TODO(hanuszczak): This should be imported conditionally.
 from MySQLdb.constants import CR as mysql_conn_errors
 
+from grr_response_core import config
 from grr_response_server.databases import db_test_mixin
 from grr_response_server.databases import db_utils
 from grr_response_server.databases import mysql
@@ -185,6 +186,34 @@ class TestMysqlDB(stats_test_lib.StatsTestMixin,
     ret = cursor.fetchall()
     cursor.close()
     return ret
+
+  def ListPruningsToProcess(prunings_root: Text) -> Sequence[Text]:
+    """Lists filenames of prunings to process."""
+    prunings = []
+    for p in os.listdir(prunings_root):
+      prunings.append(p)
+    return prunings
+
+  def testPrunings(self):
+
+    def ProcessPrunings(con):
+      to_process = ListPruningsToProcess(config.CONFIG["Mysql.prunings_dir"])
+      logging.info("Will execute following DB prunings: %s",
+                   ", ".join(to_process))
+
+      for fname in to_process:
+        start_time = time.time()
+        logging.info("Starting pruning %s", fname)
+        with open(os.path.join(migrations_root, fname)) as fd:
+          sql = fd.read()
+          with contextlib.closing(con.cursor()) as cursor:
+            cursor.execute(sql)
+
+        logging.info("Pruning %s is done. Took %.2fs", fname,
+                     time.time() - start_time)
+
+    self.db.delegate._RunInTransaction(SetMaxAllowedPacket)
+
 
   def testRunInTransaction(self):
 
