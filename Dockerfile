@@ -73,7 +73,7 @@ RUN ${VIRTUAL_ENV}/bin/python -m pip install wheel nodeenv grpcio-tools==1.60
 
 RUN ${VIRTUAL_ENV}/bin/nodeenv -p --prebuilt --node=16.13.0
 
-RUN mkdir ${GRR_SOURCE}
+RUN mkdir -p ${GRR_SOURCE}
 ADD . ${GRR_SOURCE}
 
 WORKDIR ${GRR_SOURCE}
