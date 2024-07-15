@@ -1,0 +1,26 @@
+{
+  "environment": "web",
+  "format": "html",
+  "prefix": "https://storage.googleapis.com",
+  "mainga": "UA-49880327-14",
+  "updated": "2024-07-15T15:53:49Z",
+  "id": "how-to-add-a-flow",
+  "duration": 10,
+  "title": "How to Add a Flow",
+  "authors": "Tati, Dan",
+  "summary": "How to Add a Flow",
+  "source": "how-to-add-a-flow.md",
+  "theme": "",
+  "status": [
+    "draft"
+  ],
+  "category": [
+    "grr"
+  ],
+  "tags": [
+    "flow",
+    "grr"
+  ],
+  "feedback": "https://github.com/google/grr/issues",
+  "url": "how-to-add-a-flow"
+}
