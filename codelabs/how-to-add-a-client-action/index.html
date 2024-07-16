@@ -1,0 +1,256 @@
+
+<!doctype html>
+
+<html>
+<head>
+  <meta name="viewport" content="width=device-width, minimum-scale=1.0, initial-scale=1.0, user-scalable=yes">
+  <meta name="theme-color" content="#4F7DC9">
+  <meta charset="UTF-8">
+  <title>How to Add a Client Action</title>
+  <link rel="stylesheet" href="//fonts.googleapis.com/css?family=Source+Code+Pro:400|Roboto:400,300,400italic,500,700|Roboto+Mono">
+  <link rel="stylesheet" href="//fonts.googleapis.com/icon?family=Material+Icons">
+  <link rel="stylesheet" href="https://storage.googleapis.com/claat-public/codelab-elements.css">
+  <style>
+    .success {
+      color: #1e8e3e;
+    }
+    .error {
+      color: red;
+    }
+  </style>
+</head>
+<body>
+  <google-codelab-analytics gaid="UA-49880327-14"></google-codelab-analytics>
+  <google-codelab codelab-gaid=""
+                  id="how-to-add-a-client-action"
+                  title="How to Add a Client Action"
+                  environment="web"
+                  feedback-link="https://github.com/google/grr/issues">
+    
+      <google-codelab-step label="Before you begin..." duration="1">
+        <p>This text assumes you</p>
+<ul>
+<li>understand <a href="https://www.grr-response.com/" target="_blank">GRR&#39;s basic concepts</a>,</li>
+<li>read through <a href="https://grr-doc.readthedocs.io/" target="_blank">GRR&#39;s documentation</a> and</li>
+<li>are familiar with <a href="https://github.com/google/grr" target="_blank">GRR&#39;s code base on GitHub</a>.</li>
+</ul>
+<p>You can follow the <a href="https://grr-doc.readthedocs.io/en/latest/developing-grr/index.html" target="_blank">Developing GRR guide</a> to learn what you should install on your machine and how to run GRR locally.</p>
+<p>The code you&#39;ll be touching is mostly Python. You shouldn&#39;t need to be an expert on it to follow along, but if you want some resources you can check out <a href="https://www.w3schools.com/python/" target="_blank">one of many tutorials online</a>.</p>
+
+
+      </google-codelab-step>
+    
+      <google-codelab-step label="Defining the input and outputs for your Client Action" duration="2">
+        <p>The input and outputs of your Client Action are its public interface. The input is provided by the Flow when calling your action. The outputs are what you will provide back so it can continue to process.</p>
+<aside class="special"><p> BEST PRACTICE: Use the Request as input name. This makes the link between them very obvious. For outputs, if the type of return cannot be shared (it&#39;s something specific to your action), use Result. Examples of shared/common results are StatEntry (file metadata), BufferReference (partial file content). </p>
+</aside>
+<p>You&#39;ll need to define a <code>.proto</code> and an equivalent <code>RDFValue</code> for them. Let&#39;s go through <a href="https://github.com/google/grr/blob/master/grr/proto/grr_response_proto/dummy.proto" target="_blank">an example</a>:</p>
+<pre><code language="language-protobuf" class="language-protobuf">message DummyRequest {
+  optional string action_input = 1;
+}
+
+message DummyResult {
+  optional string action_output = 1;
+}
+</code></pre>
+<p>Next, let&#39;s add the corresponding <code>RDFValue</code> <a href="https://github.com/google/grr/blob/master/grr/core/grr_response_core/lib/rdfvalues/dummy.py" target="_blank">classes</a>. They inherit from <code>RDFProtoStruct</code>, and must have the <code>protobuf</code> property set. If your proto depends on other <code>RDFValues</code> (e.g. other protos), you should add them to the list of dependencies in <code>rdf_deps</code> (<a href="https://github.com/google/grr/blob/a6f1b31abfe82794b7d82fa8d54d8bd94bfed1bb/grr/server/grr_response_server/gui/api_plugins/flow.py#L466C3-L466C11" target="_blank">example</a>).</p>
+<aside class="special"><p> NOTE: RDFValues are a Python class wrapper on top of Protos. At the time they were created, Python proto library was much more limited than it is today (yes, GRR is old). RDFValues exist for legacy reasons and are still used throughout GRR&#39;s codebase. </p>
+</aside>
+<pre><code language="language-python" class="language-python">#!/usr/bin/env python
+&#34;&#34;&#34;The various Dummy example rdfvalues.&#34;&#34;&#34;
+
+from grr_response_core.lib.rdfvalues import structs as rdf_structs
+from grr_response_proto import dummy_pb2
+
+
+class DummyRequest(rdf_structs.RDFProtoStruct):
+  &#34;&#34;&#34;Request for Dummy action.&#34;&#34;&#34;
+
+  protobuf = dummy_pb2.DummyRequest
+  rdf_deps = []
+
+
+class DummyResult(rdf_structs.RDFProtoStruct):
+  &#34;&#34;&#34;Result for Dummy action.&#34;&#34;&#34;
+
+  protobuf = dummy_pb2.DummyResult
+  rdf_deps = []
+</code></pre>
+<p>An important detail is that for Client Actions, we prefer adding the class to a separate file (see below). This is because we need to import it in both the server and the client. For Flows, we usually prefer to define them close to the Flow class definition themselves (see more on <a href="../how-to-add-a-flow/index.html" target="_blank">Adding Flows</a>).</p>
+
+
+      </google-codelab-step>
+    
+      <google-codelab-step label="Writing the Client Action class" duration="3">
+        <p>Client Actions are classes that inherit from <a href="https://github.com/google/grr/blob/a6f1b31abfe82794b7d82fa8d54d8bd94bfed1bb/grr/client/grr_response_client/actions.py#L78" target="_blank"><code>ActionPlugin</code></a>. The class must override:</p>
+<ul>
+<li><a href="https://github.com/google/grr/blob/a6f1b31abfe82794b7d82fa8d54d8bd94bfed1bb/grr/client/grr_response_client/actions.py#L98" target="_blank"><code>in_rdfvalue</code></a> and <a href="https://github.com/google/grr/blob/a6f1b31abfe82794b7d82fa8d54d8bd94bfed1bb/grr/client/grr_response_client/actions.py#L103" target="_blank"><code>out_rdfvalues</code></a> properties: these are the public interface for your action - the <code>in</code>nput provided from a Flow to the Action; and the <code>out</code>put that your Action will return to the Flow. An important detail here is that these values must be <code>RDFValue</code>s.</li>
+<li><a href="https://github.com/google/grr/blob/a6f1b31abfe82794b7d82fa8d54d8bd94bfed1bb/grr/client/grr_response_client/actions.py#L263" target="_blank"><code>Run</code></a> method: you can think of this as your action&#39;s <code>main</code>. It is the entrypoint for your action, and when it returns, the action finishes.</li>
+</ul>
+<p>The <a href="https://github.com/google/grr/blob/a6f1b31abfe82794b7d82fa8d54d8bd94bfed1bb/grr/client/grr_response_client/actions.py#L78" target="_blank"><code>ActionPlugin</code></a> base class has many helper functions that can be used. Here are the most important ones to be aware of:</p>
+<ul>
+<li><a href="https://github.com/google/grr/blob/a6f1b31abfe82794b7d82fa8d54d8bd94bfed1bb/grr/client/grr_response_client/actions.py#L341" target="_blank"><code>Progress</code></a>: If your action is not &#34;instantaneous&#34;, you should consider calling this periodically. Acts like a heartbeat so we know the client is responsive, just busy.</li>
+<li><a href="https://github.com/google/grr/blob/a6f1b31abfe82794b7d82fa8d54d8bd94bfed1bb/grr/client/grr_response_client/actions.py#L384" target="_blank"><code>ChargeBytesToSession</code></a>: Registers the amount of bytes being sent from Client to Server. The network threshold is checked periodically, and this updates the current usage.</li>
+<li><a href="https://github.com/google/grr/blob/a6f1b31abfe82794b7d82fa8d54d8bd94bfed1bb/grr/client/grr_response_client/actions.py#L290" target="_blank"><code>SendReply</code></a>: Sends a reply (output(s) of your action) to the parent Flow. Whith that in mind, let&#39;s write our Dummy client action. The action will be simple, reading an input string, modifying it, and sending a string back. It will be available in all three platforms (windows, mac, linux), but behave differently in each one.</li>
+</ul>
+<h2 is-upgraded>Writing the Unix implementation</h2>
+<p>Our action will be the same for Linux and MacOS (Unix). So, we&#39;ll add it to the <a href="https://github.com/google/grr/blob/master/grr/client/grr_response_client/client_actions/dummy.py" target="_blank">common/shared directory</a>.</p>
+<pre><code language="language-python" class="language-python">class Dummy(actions.ActionPlugin):
+  &#34;&#34;&#34;Returns the received string.&#34;&#34;&#34;
+
+  in_rdfvalue = rdf_dummy.DummyRequest
+  out_rdfvalues = [rdf_dummy.DummyResult]
+
+  def Run(self, args: rdf_dummy.DummyRequest) -&gt; None:
+    &#34;&#34;&#34;Returns received input back to the server.&#34;&#34;&#34;
+
+    if not args.action_input:
+      raise RuntimeError(&#34;args.action_input is empty, cannot proceed!&#34;)
+
+    self.SendReply(
+        rdf_dummy.DummyResult(
+            action_output=f&#34;args.action_input: &#39;{args.action_input}&#39;&#34;
+        )
+    )
+</code></pre>
+<aside class="special"><p> NOTE: On our example, we return a single response. In real life, you might want to send multiple responses (even of different types). You can consider this in your design, and take a look at existing actions that have multiple types in out_rdfvalues. </p>
+</aside>
+<h2 is-upgraded>Writing the platform-specific (Windows) implementation</h2>
+<p>For Windows, we will write a <a href="https://github.com/google/grr/blob/master/grr/client/grr_response_client/client_actions/windows/dummy.py" target="_blank">dedicated action</a>. It&#39;ll live in the windows folder. For</p>
+<pre><code language="language-python" class="language-python">class Dummy(actions.ActionPlugin):
+  &#34;&#34;&#34;Returns the received string.&#34;&#34;&#34;
+
+  in_rdfvalue = rdf_dummy.DummyRequest
+  out_rdfvalues = [rdf_dummy.DummyResult]
+
+  def Run(self, args: rdf_dummy.DummyRequest) -&gt; None:
+    &#34;&#34;&#34;Returns received input back to the server, but in Windows.&#34;&#34;&#34;
+
+    if not args.action_input:
+      raise RuntimeError(&#34;WIN args.action_input is empty, cannot proceed!&#34;)
+
+    self.SendReply(
+        rdf_dummy.DummyResult(
+            action_output=f&#34;WIN args.action_input: &#39;{args.action_input}&#39;&#34;
+        )
+    )
+</code></pre>
+
+
+      </google-codelab-step>
+    
+      <google-codelab-step label="Writing the Client Action unit tests" duration="1">
+        <h2 is-upgraded>Unix implementation unit tests</h2>
+<p>Here&#39;s an <a href="https://github.com/google/grr/blob/master/grr/client/grr_response_client/client_actions/dummy_test.py" target="_blank">example test</a> for our very simple Client Action. We only need a couple of cases to cover the branches of our logic. In your case, consider what are the boundary conditions you&#39;d like to check as well as what conditions are needed for them (you might need to mock some files, for example).</p>
+<aside class="warning"><p> IMPORTANT: ALWAYS submit your tests together with the code. </p>
+</aside>
+<p>Whenever a Client Action reaches the end of the processing, the Client sends a Status message back to the server. This is usually the last message sent to the server.</p>
+<p>On our unit tests below, we&#39;re including this message in the tests. On the successful test case, we also test the status code is <code>OK</code>. On the failure scenario, we test that it returned a <code>GENERIC_ERROR</code> (since we raise a <code>RuntimeException</code> in the action). <code>Status</code> messages can have other values as well (e.g. reached a limit). You can take a look at other actions and the proto to see how else it can be used.</p>
+<pre><code language="language-python" class="language-python">  def testDummyReceived(self):
+    action_request = rdf_dummy.DummyRequest(action_input=&#34;banana&#34;)
+
+    # We use `ExecuteAction` instead of `RunAction` to test `status` result too.
+    results = self.ExecuteAction(dummy.Dummy, action_request)
+
+    # One result, and one status message.
+    self.assertLen(results, 2)
+
+    self.assertIsInstance(results[0], rdf_dummy.DummyResult)
+    self.assertIn(&#34;banana&#34;, results[0].action_output)
+
+    self.assertIsInstance(results[1], rdf_flows.GrrStatus)
+    self.assertEqual(rdf_flows.GrrStatus.ReturnedStatus.OK, results[1].status)
+    self.assertEmpty(results[1].error_message)
+
+  def testErrorsOnEmptyInput(self):
+    action_request = rdf_dummy.DummyRequest()
+
+    # We use `ExecuteAction` instead of `RunAction` to test `status` result too.
+    results = self.ExecuteAction(dummy.Dummy, action_request)
+
+    # One status message.
+    self.assertLen(results, 1)
+
+    self.assertIsInstance(results[0], rdf_flows.GrrStatus)
+    self.assertEqual(
+        rdf_flows.GrrStatus.ReturnedStatus.GENERIC_ERROR, results[0].status
+    )
+    self.assertIn(&#34;empty&#34;, results[0].error_message)
+</code></pre>
+<h2 is-upgraded>Windows implementation unit tests</h2>
+<p>For Windows, we&#39;re doing exactly the <a href="https://github.com/google/grr/blob/master/grr/client/grr_response_client/client_actions/windows/dummy_test.py" target="_blank">same as the above</a>, except for some extra assertions that match the Client Action behavior on Windows.</p>
+<pre><code language="language-python" class="language-python">def testDummyReceived(self):
+    action_request = rdf_dummy.DummyRequest(action_input=&#34;banana&#34;)
+
+    # We use `ExecuteAction` instead of `RunAction` to test `status` result too.
+    results = self.ExecuteAction(dummy.Dummy, action_request)
+
+    # One result, and one status message.
+    self.assertLen(results, 2)
+
+    self.assertIsInstance(results[0], rdf_dummy.DummyResult)
+    self.assertIn(&#34;banana&#34;, results[0].action_output)
+    self.assertIn(&#34;WIN&#34;, results[0].action_output)
+
+    self.assertIsInstance(results[1], rdf_flows.GrrStatus)
+    self.assertEqual(rdf_flows.GrrStatus.ReturnedStatus.OK, results[1].status)
+    self.assertEmpty(results[1].error_message)
+
+  def testErrorsOnEmptyInput(self):
+    action_request = rdf_dummy.DummyRequest()
+
+    # We use `ExecuteAction` instead of `RunAction` to test `status` result too.
+    results = self.ExecuteAction(dummy.Dummy, action_request)
+
+    # One status message.
+    self.assertLen(results, 1)
+
+    self.assertIsInstance(results[0], rdf_flows.GrrStatus)
+    self.assertEqual(
+        rdf_flows.GrrStatus.ReturnedStatus.GENERIC_ERROR, results[0].status
+    )
+    self.assertIn(&#34;empty&#34;, results[0].error_message)
+</code></pre>
+
+
+      </google-codelab-step>
+    
+      <google-codelab-step label="Registering your Client Action" duration="1">
+        <p>Now that we have an implemented and tested action, we can register it so it is available to be called (cl/559042698)! Hooray!</p>
+<p>For that you need to add it to the following places:</p>
+<p>To the <a href="https://github.com/google/grr/blob/master/grr/server/grr_response_server/server_stubs.py#L54" target="_blank"><code>server_stubs</code></a>. The stub must have the same name, <code>in_</code> and <code>out_rdfvalues</code> as your class declared on the previous step.</p>
+<pre><code language="language-python" class="language-python">class Dummy(ClientActionStub):
+  &#34;&#34;&#34;Dummy example. Reads a message and sends it back.&#34;&#34;&#34;
+
+  in_rdfvalue = rdf_dummy.DummyRequest
+  out_rdfvalues = [rdf_dummy.DummyResult]
+</code></pre>
+<p>To the <a href="https://github.com/google/grr/blob/a6f1b31abfe82794b7d82fa8d54d8bd94bfed1bb/grr/server/grr_response_server/action_registry.py#L10" target="_blank"><code>action_registry</code></a> and <a href="https://github.com/google/grr/blob/a6f1b31abfe82794b7d82fa8d54d8bd94bfed1bb/grr/client/grr_response_client/client_actions/registry_init.py#L74" target="_blank"><code>registry_init</code></a>. The registry key should also have the same class name. Note that, we&#39;re registering this implementation for both Linux and Darwin, but will do something different for Windows (see next step).</p>
+<pre><code language="language-python" class="language-python">   &#34;Dummy&#34;: server_stubs.Dummy,
+</code></pre>
+<pre><code language="language-python" class="language-python">client_actions.Register(&#34;Dummy&#34;, dummy.Dummy)
+</code></pre>
+<h2 is-upgraded>Registering platform-specific</h2>
+<p>Notice that when registering it, we&#39;ll register it on the [<code>Windows</code>] <a href="https://github.com/google/grr/blob/a6f1b31abfe82794b7d82fa8d54d8bd94bfed1bb/grr/client/grr_response_client/client_actions/registry_init.py#L87" target="_blank">section</a> of the code.</p>
+<pre><code language="language-python" class="language-python">client_actions.Register(&#34;Dummy&#34;, win_dummy.Dummy)
+</code></pre>
+
+
+      </google-codelab-step>
+    
+      <google-codelab-step label="... And now to call it from a Flow!" duration="1">
+        <p>That&#39;s it, your Client Action is complete! Now you can start using it in an existing or new Flow! See <a href="../how-to-add-a-flow/index.html" target="_blank">Adding a Flow</a></p>
+
+
+      </google-codelab-step>
+    
+  </google-codelab>
+
+  <script src="https://storage.googleapis.com/claat-public/native-shim.js"></script>
+  <script src="https://storage.googleapis.com/claat-public/custom-elements.min.js"></script>
+  <script src="https://storage.googleapis.com/claat-public/prettify.js"></script>
+  <script src="https://storage.googleapis.com/claat-public/codelab-elements.js"></script>
+  <script src="//support.google.com/inapp/api.js"></script>
+
+</body>
+</html>

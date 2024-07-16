@@ -47,7 +47,7 @@ message DummyFlowResult {
 
 ### Write the FlowArgs and FlowResult ```RDFValue``` classes
 
-Next, let's add the corresponding ```RDFValue``` [classes](https://github.com/google/grr/blob/a903d33a9af9b1e4d31d604e073dc8c7a63fd77d/grr/core/grr_response_core/lib/rdfvalues/dummy.py). They inherit from ```RDFProtoStruct```, and must have the ```protobuf``` property set. If your proto depends on other ```RDFValue```s (e.g. other protos), you should add them to the list of dependencies in ```rdf_deps``` (examples).
+Next, let's add the corresponding ```RDFValue``` [classes](https://github.com/google/grr/blob/a903d33a9af9b1e4d31d604e073dc8c7a63fd77d/grr/core/grr_response_core/lib/rdfvalues/dummy.py). They inherit from ```RDFProtoStruct```, and must have the ```protobuf``` property set. If your proto depends on other ```RDFValue```s (e.g. other protos), you should add them to the list of dependencies in ```rdf_deps``` ([example](https://github.com/google/grr/blob/a6f1b31abfe82794b7d82fa8d54d8bd94bfed1bb/grr/server/grr_response_server/gui/api_plugins/flow.py#L466C3-L466C11)).
 
 <aside class="positive">
 RDFValues are a Python class wrapper on top of Protos. At the time they were created, Python proto library was much more limited than it is today (yes, GRR is old). RDFValues exist for legacy reasons and are still used throughout GRR's codebase.
@@ -67,7 +67,7 @@ class DummyFlowResult(rdf_structs.RDFProtoStruct):
   rdf_deps = []
 ```
 
-In this case, we're defining them close to where the ```Flow``` will eventually live. It'd also be ok to define them in the same file where the Client Action ```RDFValue```s were defined (see Adding Client Actions).
+In this case, we're defining them close to where the ```Flow``` will eventually live. It'd also be ok to define them in the same file where the Client Action ```RDFValue```s were defined (see [Adding Client Actions](../how-to-add-a-client-action/index.html)).
 
 <!-- ------------------------ -->
 ## Writing the Flow class

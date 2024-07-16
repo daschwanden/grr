@@ -55,7 +55,7 @@ message DummyFlowResult {
 }
 </code></pre>
 <h2 is-upgraded>Write the FlowArgs and FlowResult <code>RDFValue</code> classes</h2>
-<p>Next, let&#39;s add the corresponding <code>RDFValue</code> <a href="https://github.com/google/grr/blob/a903d33a9af9b1e4d31d604e073dc8c7a63fd77d/grr/core/grr_response_core/lib/rdfvalues/dummy.py" target="_blank">classes</a>. They inherit from <code>RDFProtoStruct</code>, and must have the <code>protobuf</code> property set. If your proto depends on other <code>RDFValue</code>s (e.g. other protos), you should add them to the list of dependencies in <code>rdf_deps</code> (examples).</p>
+<p>Next, let&#39;s add the corresponding <code>RDFValue</code> <a href="https://github.com/google/grr/blob/a903d33a9af9b1e4d31d604e073dc8c7a63fd77d/grr/core/grr_response_core/lib/rdfvalues/dummy.py" target="_blank">classes</a>. They inherit from <code>RDFProtoStruct</code>, and must have the <code>protobuf</code> property set. If your proto depends on other <code>RDFValue</code>s (e.g. other protos), you should add them to the list of dependencies in <code>rdf_deps</code> (<a href="https://github.com/google/grr/blob/a6f1b31abfe82794b7d82fa8d54d8bd94bfed1bb/grr/server/grr_response_server/gui/api_plugins/flow.py#L466C3-L466C11" target="_blank">example</a>).</p>
 <aside class="special"><p> RDFValues are a Python class wrapper on top of Protos. At the time they were created, Python proto library was much more limited than it is today (yes, GRR is old). RDFValues exist for legacy reasons and are still used throughout GRR&#39;s codebase. </p>
 </aside>
 <pre><code language="language-python" class="language-python">class DummyArgs(rdf_structs.RDFProtoStruct):
@@ -70,7 +70,7 @@ class DummyFlowResult(rdf_structs.RDFProtoStruct):
   protobuf = dummy_pb2.DummyFlowResult
   rdf_deps = []
 </code></pre>
-<p>In this case, we&#39;re defining them close to where the <code>Flow</code> will eventually live. It&#39;d also be ok to define them in the same file where the Client Action <code>RDFValue</code>s were defined (see Adding Client Actions).</p>
+<p>In this case, we&#39;re defining them close to where the <code>Flow</code> will eventually live. It&#39;d also be ok to define them in the same file where the Client Action <code>RDFValue</code>s were defined (see <a href="../how-to-add-a-client-action/index.html" target="_blank">Adding Client Actions</a>).</p>
 
 
       </google-codelab-step>
