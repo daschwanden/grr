@@ -11,14 +11,14 @@ Feedback Link: https://github.com/google/grr/issues
 ## Before you begin...
 Duration: 1
 
-This text assumes you
+This code lab assumes that you
 - understand [GRR's basic concepts](https://www.grr-response.com/),
 - read through [GRR's documentation](https://grr-doc.readthedocs.io/) and
 - are familiar with [GRR's code base on GitHub](https://github.com/google/grr).
 
 You can follow the [Developing GRR guide](https://grr-doc.readthedocs.io/en/latest/developing-grr/index.html) to learn what you should install on your machine and how to run GRR locally.
 
-The code you'll be touching is mostly Python. You shouldn't need to be an expert on it to follow along, but if you want some resources you can check out [one of many tutorials online](https://www.w3schools.com/python/).
+The code you'll be touching is mostly Python. You don't need to be an expert to follow along, but if you want more background you can check out [one of many tutorials online](https://www.w3schools.com/python/).
 
 <!-- ------------------------ -->
 ## Defining the input and outputs for your Client Action

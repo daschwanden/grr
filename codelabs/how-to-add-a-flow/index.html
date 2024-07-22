@@ -28,20 +28,20 @@
                   feedback-link="https://github.com/google/grr/issues">
     
       <google-codelab-step label="Before you begin..." duration="1">
-        <p>This text assumes you</p>
+        <p>This code lab assumes that you</p>
 <ul>
 <li>understand <a href="https://www.grr-response.com/" target="_blank">GRR&#39;s basic concepts</a>,</li>
 <li>read through <a href="https://grr-doc.readthedocs.io/" target="_blank">GRR&#39;s documentation</a> and</li>
 <li>are familiar with <a href="https://github.com/google/grr" target="_blank">GRR&#39;s code base on GitHub</a>.</li>
 </ul>
 <p>You can follow the <a href="https://grr-doc.readthedocs.io/en/latest/developing-grr/index.html" target="_blank">Developing GRR guide</a> to learn what you should install on your machine and how to run GRR locally.</p>
-<p>The code you&#39;ll be touching is mostly Python. You shouldn&#39;t need to be an expert on it to follow along, but if you want some resources you can check out <a href="https://www.w3schools.com/python/" target="_blank">one of many tutorials online</a>.</p>
+<p>The code you&#39;ll be touching is mostly Python. You don&#39;t need to be an expert to follow along, but if you want more background you can check out <a href="https://www.w3schools.com/python/" target="_blank">one of many tutorials online</a>.</p>
 
 
       </google-codelab-step>
     
-      <google-codelab-step label="Defining the input, outputs and progress for your Flow" duration="2">
-        <p>The input and outputs of your Flow are its public interface. The input is provided by the user (via API or UI) when starting it. The outputs are what you will provide back to them. Progress is an optional message that give users some feedback of how much the flow has processed so far - this is more important for flows that take longer to process, or are running something multiple times (e.g. &#34;collected 1 out of 10 files&#34;).</p>
+      <google-codelab-step label="Defining the input, outputs and progress for your Flow" duration="5">
+        <p>The input and output of your Flow are its public interface. The input is provided by the user (via the API or the UI) when starting the Flow. The output is what will be provided back to them. Progress is an optional message that gives users some feedback of how much the Flow has processed so far - this is more important for Flows that take longer to process, or are running something multiple times (e.g. &#34;collected 1 out of 10 files&#34;).</p>
 <p>You&#39;ll need to define a <code>.proto</code> and an equivalent <code>RDFValue</code> for each. Let&#39;s go through an example.</p>
 <h2 is-upgraded>Writing the FlowArgs and FlowResult <code>.proto</code></h2>
 <p>First, write the <a href="https://github.com/google/grr/blob/a903d33a9af9b1e4d31d604e073dc8c7a63fd77d/grr/proto/grr_response_proto/dummy.proto" target="_blank"><code>.proto</code></a> <code>messages</code> for your new Flow.</p>
@@ -56,7 +56,7 @@ message DummyFlowResult {
 </code></pre>
 <h2 is-upgraded>Write the FlowArgs and FlowResult <code>RDFValue</code> classes</h2>
 <p>Next, let&#39;s add the corresponding <code>RDFValue</code> <a href="https://github.com/google/grr/blob/a903d33a9af9b1e4d31d604e073dc8c7a63fd77d/grr/core/grr_response_core/lib/rdfvalues/dummy.py" target="_blank">classes</a>. They inherit from <code>RDFProtoStruct</code>, and must have the <code>protobuf</code> property set. If your proto depends on other <code>RDFValue</code>s (e.g. other protos), you should add them to the list of dependencies in <code>rdf_deps</code> (<a href="https://github.com/google/grr/blob/a6f1b31abfe82794b7d82fa8d54d8bd94bfed1bb/grr/server/grr_response_server/gui/api_plugins/flow.py#L466C3-L466C11" target="_blank">example</a>).</p>
-<aside class="special"><p> RDFValues are a Python class wrapper on top of Protos. At the time they were created, Python proto library was much more limited than it is today (yes, GRR is old). RDFValues exist for legacy reasons and are still used throughout GRR&#39;s codebase. </p>
+<aside class="special"><p> RDFValues are a Python class wrapper on top of Protos. At the time they were created, the Python proto library was much more limited than it is today (yes, GRR is old). RDFValues exist for legacy reasons and are still used throughout GRR&#39;s codebase. </p>
 </aside>
 <pre><code language="language-python" class="language-python">class DummyArgs(rdf_structs.RDFProtoStruct):
   &#34;&#34;&#34;Request for Dummy action.&#34;&#34;&#34;
@@ -79,27 +79,27 @@ class DummyFlowResult(rdf_structs.RDFProtoStruct):
         <p>Flows are classes that inherit from <a href="https://github.com/google/grr/blob/master/grr/server/grr_response_server/flow_base.py" target="_blank"><code>FlowBase</code></a>. The class must override:</p>
 <ul>
 <li><a href="https://github.com/google/grr/blob/a6f1b31abfe82794b7d82fa8d54d8bd94bfed1bb/grr/server/grr_response_server/flow_base.py#L151" target="_blank"><code>args_type</code></a> and <a href="https://github.com/google/grr/blob/a6f1b31abfe82794b7d82fa8d54d8bd94bfed1bb/grr/server/grr_response_server/flow_base.py#L171" target="_blank"><code>result_types</code></a> properties: these are the public interface for your Flow - the input provided from the user to your Flow, and what the Flow will output back to them. An important detail here is that this value must be an <code>RDFValue</code>.</li>
-<li><a href="https://github.com/google/grr/blob/a6f1b31abfe82794b7d82fa8d54d8bd94bfed1bb/grr/server/grr_response_server/flow_base.py#L197" target="_blank"><code>Start</code></a> method: this is the entrypoint for your Flow (the first state that will be executed). Flows are asyncrhonous, meaning they often do some work; then have to wait for either the Client or another Flow to do some work before it can continue. In our example Flow below, the Start method simply calls a Client Action. Then, after the Client Action finishes and all the data is back, GRR starts processing the <code>next_state</code> class method (please refer to Life of a Flow for more details).</li>
+<li><a href="https://github.com/google/grr/blob/a6f1b31abfe82794b7d82fa8d54d8bd94bfed1bb/grr/server/grr_response_server/flow_base.py#L197" target="_blank"><code>Start</code></a> method: this is the entrypoint for your Flow (the first state that will be executed). Flows are asynchronous, meaning they often do some work; then have to wait for either the Client or another Flow to do some work before they can continue. In our example Flow below, the Start method simply calls a Client Action. Then, after the Client Action finishes and all the data has been received back, GRR starts processing the <code>next_state</code> class method (please refer to <a href="https://grr-doc.readthedocs.io/en/latest/investigating-with-grr/flows/what-are-flows.html" target="_blank">GRR Flows</a> for more details).</li>
 </ul>
 <p>Optionally, there are some properties that can influence GRR&#39;s UI (the old and the new). In our case, we&#39;re filling these out to help us see it later:</p>
 <ul>
-<li><a href="https://github.com/google/grr/blob/a6f1b31abfe82794b7d82fa8d54d8bd94bfed1bb/grr/server/grr_response_server/flow_base.py#L161" target="_blank"><code>friendly_name</code></a> is displayed as the flow name if available.</li>
-<li><a href="https://github.com/google/grr/blob/a6f1b31abfe82794b7d82fa8d54d8bd94bfed1bb/grr/server/grr_response_server/flow_base.py#L160" target="_blank"><code>category</code></a> is in which group of flows it will be shown (together with others).</li>
+<li><a href="https://github.com/google/grr/blob/a6f1b31abfe82794b7d82fa8d54d8bd94bfed1bb/grr/server/grr_response_server/flow_base.py#L161" target="_blank"><code>friendly_name</code></a> is displayed as the Flow name if available.</li>
+<li><a href="https://github.com/google/grr/blob/a6f1b31abfe82794b7d82fa8d54d8bd94bfed1bb/grr/server/grr_response_server/flow_base.py#L160" target="_blank"><code>category</code></a> is in which group of Flows it will be shown (together with others).</li>
 <li><a href="https://github.com/google/grr/blob/a6f1b31abfe82794b7d82fa8d54d8bd94bfed1bb/grr/server/grr_response_server/flow_base.py#L167" target="_blank"><code>behaviours</code></a> is in which &#34;user UI mode&#34; it will be shown. Users can configure how they see the UI (basic, advanced, debug). Since we don&#39;t want this to crowd the UI unecessarily, here we&#39;re adding it to <code>DEBUG</code>.</li>
 </ul>
 <p>The <a href="https://github.com/google/grr/blob/master/grr/server/grr_response_server/flow_base.py" target="_blank"><code>FlowBase</code></a> base class has many other methods of interest. Here are the most important ones to be aware of:</p>
 <ul>
 <li><a href="https://github.com/google/grr/blob/a6f1b31abfe82794b7d82fa8d54d8bd94bfed1bb/grr/server/grr_response_server/flow_base.py#L1161" target="_blank"><code>GetProgress</code></a>: If you&#39;ve defined a &lt;FlowName&gt;Progress message, you can return fill it out based on partial/full data here to report it.</li>
-<li><a href="https://github.com/google/grr/blob/a6f1b31abfe82794b7d82fa8d54d8bd94bfed1bb/grr/server/grr_response_server/flow_base.py#L711" target="_blank"><code>Log</code></a>: Registers a message to the flow Log. This is super useful for debugging, but not really read if everything goes smoothly.</li>
-<li><a href="https://github.com/google/grr/blob/a6f1b31abfe82794b7d82fa8d54d8bd94bfed1bb/grr/server/grr_response_server/flow_base.py#L1170" target="_blank"><code>GetFilesArchiveMappings</code></a>: This one is super useful for users to later download files from your flow. If the flow collects file contents, consider implementing this so it returns the contents of all relevant files to the user when downloading results.</li>
+<li><a href="https://github.com/google/grr/blob/a6f1b31abfe82794b7d82fa8d54d8bd94bfed1bb/grr/server/grr_response_server/flow_base.py#L711" target="_blank"><code>Log</code></a>: Registers a message to the Flow Log. This is super useful for debugging, but not really read if everything goes smoothly.</li>
+<li><a href="https://github.com/google/grr/blob/a6f1b31abfe82794b7d82fa8d54d8bd94bfed1bb/grr/server/grr_response_server/flow_base.py#L1170" target="_blank"><code>GetFilesArchiveMappings</code></a>: This one is super useful for users to later download files from your Flow. If the Flow collects file contents, consider implementing this so it returns the contents of all relevant files to the user when downloading results.</li>
 <li><a href="https://github.com/google/grr/blob/a6f1b31abfe82794b7d82fa8d54d8bd94bfed1bb/grr/server/grr_response_server/flow_base.py#L492" target="_blank"><code>SendReply</code></a>: Sends a reply (output(s) of your Flow).</li>
-<li><a href="https://github.com/google/grr/blob/a6f1b31abfe82794b7d82fa8d54d8bd94bfed1bb/grr/server/grr_response_server/flow_base.py#L492" target="_blank"><code>End</code></a>: This is the last state executed by the flow before it completes. If you need something done at the end, consider adding it here.</li>
+<li><a href="https://github.com/google/grr/blob/a6f1b31abfe82794b7d82fa8d54d8bd94bfed1bb/grr/server/grr_response_server/flow_base.py#L492" target="_blank"><code>End</code></a>: This is the last state executed by the Flow before it completes. If you need something done at the end, consider adding it here.</li>
 </ul>
-<p>Whith all of that in mind, let&#39;s write our <a href="https://github.com/google/grr/blob/master/grr/server/grr_response_server/flows/general/dummy.py" target="_blank">Dummy flow</a>. When it starts, it will simply read the input string, modify it, and send it to the Client Action. When the Client Action finishes, we&#39;ll also append to the string and return our flow results.</p>
+<p>Whith all of that in mind, let&#39;s write our <a href="https://github.com/google/grr/blob/master/grr/server/grr_response_server/flows/general/dummy.py" target="_blank">Dummy Flow</a>. When it starts, it will simply read the input string, modify it, and send it to the Client Action. When the Client Action finishes, we&#39;ll also append to the string and return our Flow results.</p>
 <pre><code language="language-python" class="language-python">class Dummy(flow_base.FlowBase):
   &#34;&#34;&#34;A mechanism to send a string to the client and back.
 
-  Returns to parent flow:
+  Returns to parent Flow:
     A DummyFlowResult with a modified string.
   &#34;&#34;&#34;
 
@@ -131,7 +131,7 @@ class DummyFlowResult(rdf_structs.RDFProtoStruct):
       self, responses: flow_responses.Responses[rdf_dummy.DummyResult]
   ):
     &#34;&#34;&#34;Receives the action output and processes it.&#34;&#34;&#34;
-    # Checks the &#34;Status&#34; of the action, attaching information to the flow.A
+    # Checks the &#34;Status&#34; of the action, attaching information to the Flow.
     if not responses.success:
       raise flow_base.FlowError(responses.status)
 
@@ -150,7 +150,7 @@ class DummyFlowResult(rdf_structs.RDFProtoStruct):
 
     self.Log(&#34;Finished ReceiveActionOutput.&#34;)
 </code></pre>
-<aside class="special"><p> In our example, we return a single response. In real life, you might want to send multiple responses (even of different types). You can consider this in your design, and take a look at existing flows that do it. </p>
+<aside class="special"><p> In our example, we return a single response. In real life, you might want to send multiple responses (even of different types). You can consider this in your design, and take a look at existing Flows that do it. </p>
 </aside>
 
 
@@ -158,7 +158,7 @@ class DummyFlowResult(rdf_structs.RDFProtoStruct):
     
       <google-codelab-step label="Writing the Flow unit tests" duration="1">
         <p>Here&#39;s an <a href="https://github.com/google/grr/blob/master/grr/server/grr_response_server/flows/general/dummy_test.py" target="_blank">example test</a> for our very simple Flow. We are aiming at covering the different scenarios that can happen, where things can go wrong, and what we expect to happen in these cases.</p>
-<p>In the first test, we&#39;re testing the happy path. Here, the flow has an input string, provides it to the mocked client, the client returns as we expect and we test the flow result.</p>
+<p>In the first test, we&#39;re testing the happy path. Here, the Flow has an input string, provides it to the mocked client, the client returns as we expect and we test the Flow result.</p>
 <p>On the second test, we&#39;re testing the <code>Start</code> method argument validation. Here, it shouldn&#39;t matter which client action or mock you provide, as the client action will never be called.</p>
 <p>The third test uses a client mock to test the <code>next_state</code> function, and that it fails under the right conditions.</p>
 <aside class="warning"><p> IMPORTANT: ALWAYS submit your tests together with the code. </p>
@@ -195,7 +195,7 @@ class DummyTest(flow_test_lib.FlowTestsBaseclass):
     self.client_id = self.SetupClient(0)
 
   def testHasInput(self):
-    &#34;&#34;&#34;Test that the Dummy flow works.&#34;&#34;&#34;
+    &#34;&#34;&#34;Test that the Dummy Flow works.&#34;&#34;&#34;
 
     flow_id = flow_test_lib.TestFlowHelper(
         dummy.Dummy.__name__,
@@ -215,7 +215,7 @@ class DummyTest(flow_test_lib.FlowTestsBaseclass):
     )
 
   def testFailsIfEmptyFlowInput(self):
-    &#34;&#34;&#34;Test that the Dummy flow fails when there&#39;s no input.&#34;&#34;&#34;
+    &#34;&#34;&#34;Test that the Dummy Flow fails when there&#39;s no input.&#34;&#34;&#34;
 
     with self.assertRaisesRegex(
         RuntimeError, r&#34;args.flow_input is empty, cannot proceed!&#34;
@@ -230,7 +230,7 @@ class DummyTest(flow_test_lib.FlowTestsBaseclass):
       )
 
   def testFailsIfMultipleActionOutputs(self):
-    &#34;&#34;&#34;Test that the Dummy flow fails when there&#39;s no input.&#34;&#34;&#34;
+    &#34;&#34;&#34;Test that the Dummy Flow fails when there&#39;s no input.&#34;&#34;&#34;
 
     with self.assertRaisesRegex(
         RuntimeError, r&#34;.*Oops, something weird happened.*&#34;
@@ -266,7 +266,7 @@ if __name__ == &#34;__main__&#34;:
 <p>To <a href="https://github.com/google/grr/blob/a6f1b31abfe82794b7d82fa8d54d8bd94bfed1bb/api_client/python/grr_api_client/utils.py#L27" target="_blank"><code>utils</code></a> to be used by the api client.</p>
 <pre><code language="language-python" class="language-python">from grr_response_proto import dummy_pb2
 </code></pre>
-<p>When a new flow is registered, you will also need to add the new protos to the UI code. You can do that by running:</p>
+<p>When a new Flow is registered, you will also need to add the new protos to the UI code. You can do that by running:</p>
 <pre><code language="language-python" class="language-python"></code></pre>
 
 
@@ -274,9 +274,9 @@ if __name__ == &#34;__main__&#34;:
     
       <google-codelab-step label="Writing the Flow end to end tests" duration="1">
         <p>GRR also has end to end tests.</p>
-<p>In your test functions, ou can use <code>RunFlowAndWait</code> to run your flow with the arguments you want, and then consult/test flow results and other properties such as whether logs were written or not. Here&#39;s an <a href="https://github.com/google/grr/blob/master/grr/test/grr_response_test/end_to_end_tests/tests/dummy.py" target="_blank">example end to end test</a> for our Dummy flow.</p>
+<p>In your test functions, you can use <code>RunFlowAndWait</code> to run your Flow with the arguments you want, and then consult/test Flow results and other properties such as whether logs were written or not. Here&#39;s an <a href="https://github.com/google/grr/blob/master/grr/test/grr_response_test/end_to_end_tests/tests/dummy.py" target="_blank">example end to end test</a> for our Dummy Flow.</p>
 <pre><code language="language-python" class="language-python">#!/usr/bin/env python
-&#34;&#34;&#34;End to end tests for GRR dummy example flow.&#34;&#34;&#34;
+&#34;&#34;&#34;End to end tests for GRR dummy example Flow.&#34;&#34;&#34;
 
 from grr_response_test.end_to_end_tests import test_base
 
@@ -334,30 +334,17 @@ class TestDummyWindows(test_base.EndToEndTest):
 
     self.assertTrue(False)
 </code></pre>
-<p>These also need to be registered to run in each platform:</p>
-<ul>
-<li><code>darwin_tests</code></li>
-</ul>
-<pre><code language="language-python" class="language-python"></code></pre>
-<ul>
-<li><code>linux_tests</code></li>
-</ul>
-<pre><code language="language-python" class="language-python"></code></pre>
-<ul>
-<li><code>windows_tests</code></li>
-</ul>
-<pre><code language="language-python" class="language-python"></code></pre>
 
 
       </google-codelab-step>
     
       <google-codelab-step label="... And now to call it from a Flow!" duration="1">
-        <p>That&#39;s it, your flow is complete! Now you can trigger it locally.</p>
+        <p>That&#39;s it, your Flow is complete! Now you can trigger it locally.</p>
 <ol type="1">
 <li>Make sure GRR and Fleetspeak Servers and Clients are running! See more on the <a href="https://grr-doc.readthedocs.io/en/latest/developing-grr/setting-up-dev-env.html" target="_blank">development setup page</a>.</li>
 <li>Get your local Client&#39;s ID. It should show up on your client terminal. Search for <code>client id</code>: <img alt="client-id-on-terminal" src="img/d017fa9da69de619.png"></li>
 <li>Then access your local legacy UI instance in your browser. By default, it is: <a href="http://localhost:8081/legacy#/clients/C.%3Cclient_id_here%3E" target="_blank">http://localhost:8081/legacy#/clients/C.&lt;client_id_here&gt;</a></li>
-<li>Go to <code>Start new flows</code>. Your flow should be listed there. <img alt="start-dummy-flow" src="img/6c9a5a2e4dda7150.png"></li>
+<li>Go to <code>Start new flows</code>. Your Flow should be listed there. <img alt="start-dummy-flow" src="img/6c9a5a2e4dda7150.png"></li>
 <li>After you launch it, you should be able to see the results in <code>Manage launched flows</code>. <img alt="dumy-flow-result" src="img/393c15c6957817a8.png"></li>
 </ol>
 
