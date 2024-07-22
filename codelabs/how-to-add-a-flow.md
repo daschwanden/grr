@@ -36,6 +36,7 @@ First, write the [```.proto```](https://github.com/google/grr/blob/a903d33a9af9b
 Use the <FlowName>FlowArgs as input name. This makes the link between them very obvious. For outputs, if the type of return cannot be shared (it's something specific to your action), use <FlowName>FlowResult. Examples of shared/common results are StatEntry (file metadata), BufferReference (partial file content). For the progress name, use <FlowName>Progress.
 </aside>
 
+[https://github.com/google/grr/blob/master/grr/proto/grr_response_proto/dummy.proto](https://github.com/google/grr/blob/master/grr/proto/grr_response_proto/dummy.proto)
 ```protobuf
 message DummyArgs {
   optional string flow_input = 1;
@@ -53,6 +54,7 @@ Next, let's add the corresponding ```RDFValue``` [classes](https://github.com/go
 RDFValues are a Python class wrapper on top of Protos. At the time they were created, the Python proto library was much more limited than it is today (yes, GRR is old). RDFValues exist for legacy reasons and are still used throughout GRR's codebase.
 </aside>
 
+[https://github.com/google/grr/blob/master/grr/core/grr_response_core/lib/rdfvalues/dummy.py](https://github.com/google/grr/blob/master/grr/core/grr_response_core/lib/rdfvalues/dummy.py)
 ```python
 class DummyArgs(rdf_structs.RDFProtoStruct):
   """Request for Dummy action."""
@@ -71,7 +73,7 @@ In this case, we're defining them close to where the ```Flow``` will eventually 
 
 <!-- ------------------------ -->
 ## Writing the Flow class
-Duration: 3
+Duration: 4
 
 Flows are classes that inherit from [```FlowBase```](https://github.com/google/grr/blob/master/grr/server/grr_response_server/flow_base.py). The class must override:
 
@@ -95,6 +97,7 @@ The [```FlowBase```](https://github.com/google/grr/blob/master/grr/server/grr_re
 
 Whith all of that in mind, let's write our [Dummy Flow](https://github.com/google/grr/blob/master/grr/server/grr_response_server/flows/general/dummy.py). When it starts, it will simply read the input string, modify it, and send it to the Client Action. When the Client Action finishes, we'll also append to the string and return our Flow results.
 
+[https://github.com/google/grr/blob/master/grr/server/grr_response_server/flows/general/dummy.py](https://github.com/google/grr/blob/master/grr/server/grr_response_server/flows/general/dummy.py)
 ```python
 class Dummy(flow_base.FlowBase):
   """A mechanism to send a string to the client and back.
@@ -157,7 +160,7 @@ In our example, we return a single response. In real life, you might want to sen
 
 <!-- ------------------------ -->
 ## Writing the Flow unit tests
-Duration: 1
+Duration: 5
 
 Here's an [example test](https://github.com/google/grr/blob/master/grr/server/grr_response_server/flows/general/dummy_test.py) for our very simple Flow. We are aiming at covering the different scenarios that can happen, where things can go wrong, and what we expect to happen in these cases.
 
@@ -171,6 +174,7 @@ The third test uses a client mock to test the ```next_state``` function, and tha
 IMPORTANT: ALWAYS submit your tests together with the code.
 </aside>
 
+[https://github.com/google/grr/blob/master/grr/server/grr_response_server/flows/general/dummy_test.py](https://github.com/google/grr/blob/master/grr/server/grr_response_server/flows/general/dummy_test.py)
 ```python
 # Mocks the Dummy Client Action.
 class DummyActionReturnsOnce(actions.ActionPlugin):
@@ -265,7 +269,7 @@ if __name__ == "__main__":
 
 <!-- ------------------------ -->
 ## Registering your Flow
-Duration: 1
+Duration: 4
 
 Now that we have an implemented and tested action, we can register it so it is available to be called! Hooray!
 
@@ -273,12 +277,14 @@ For that you need to add it to the following places.
 
 To [```registry_init```](https://github.com/google/grr/blob/a6f1b31abfe82794b7d82fa8d54d8bd94bfed1bb/grr/server/grr_response_server/flows/general/registry_init.py#L11) to be used regularly.
 
+[https://github.com/google/grr/blob/master/grr/server/grr_response_server/flows/general/registry_init.py](https://github.com/google/grr/blob/master/grr/server/grr_response_server/flows/general/registry_init.py)
 ```python
 from grr_response_server.flows.general import dummy
 ```
 
 To [```utils```](https://github.com/google/grr/blob/a6f1b31abfe82794b7d82fa8d54d8bd94bfed1bb/api_client/python/grr_api_client/utils.py#L27) to be used by the api client.
 
+[https://github.com/google/grr/blob/master/api_client/python/grr_api_client/utils.py](https://github.com/google/grr/blob/master/api_client/python/grr_api_client/utils.py)
 ```python
 from grr_response_proto import dummy_pb2
 ```
@@ -291,12 +297,13 @@ When a new Flow is registered, you will also need to add the new protos to the U
 
 <!-- ------------------------ -->
 ## Writing the Flow end to end tests
-Duration: 1
+Duration: 5
 
 GRR also has end to end tests.
 
 In your test functions, you can use ```RunFlowAndWait``` to run your Flow with the arguments you want, and then consult/test Flow results and other properties such as whether logs were written or not. Here's an [example end to end test](https://github.com/google/grr/blob/master/grr/test/grr_response_test/end_to_end_tests/tests/dummy.py) for our Dummy Flow.
 
+[https://github.com/google/grr/blob/master/grr/test/grr_response_test/end_to_end_tests/tests/dummy.py](https://github.com/google/grr/blob/master/grr/test/grr_response_test/end_to_end_tests/tests/dummy.py)
 ```python
 #!/usr/bin/env python
 """End to end tests for GRR dummy example Flow."""
@@ -360,7 +367,7 @@ class TestDummyWindows(test_base.EndToEndTest):
 
 <!-- ------------------------ -->
 ## ... And now to call it from a Flow!
-Duration: 1
+Duration: 3
 
 That's it, your Flow is complete! Now you can trigger it locally.
 

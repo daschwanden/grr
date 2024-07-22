@@ -27,6 +27,7 @@ services:
       retries: 10
 
   grr-admin-ui:
+    build: .
     image: ghcr.io/google/grr:latest
     container_name: grr-admin-ui
     hostname: admin-ui
@@ -57,6 +58,13 @@ services:
       test: "/configs/healthchecks/grr-admin-ui.sh"
       timeout: 10s
       retries: 10
+    develop:
+      watch:
+        - action: sync+restart
+          path: ./grr
+          target: /usr/src/grr/grr
+          ignore:
+            - client/
 
   grr-fleetspeak-frontend:
     image: ghcr.io/google/grr:latest
@@ -150,8 +158,10 @@ services:
     develop:
       watch:
         - action: sync+restart
-          path: ./grr/server
-          target: /usr/src/grr/grr/server
+          path: ./grr
+          target: /usr/src/grr/grr
+          ignore:
+            - client/
 
   grr-client:
     build: .
@@ -187,8 +197,10 @@ services:
     develop:
       watch:
         - action: sync+restart
-          path: ./grr/client
-          target: /usr/src/grr/grr/client
+          path: ./grr
+          target: /usr/src/grr/grr
+          ignore:
+            - server/
 
 volumes:
   db_data:

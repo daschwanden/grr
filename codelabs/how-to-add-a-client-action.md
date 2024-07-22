@@ -22,16 +22,17 @@ The code you'll be touching is mostly Python. You don't need to be an expert to 
 
 <!-- ------------------------ -->
 ## Defining the input and outputs for your Client Action
-Duration: 2
+Duration: 5
 
-The input and outputs of your Client Action are its public interface. The input is provided by the Flow when calling your action. The outputs are what you will provide back so it can continue to process.
+The input and output of your Client Action are its public interface. The input is provided by the Flow when calling your action. The output is what will be provided back so it can continue to process.
 
 <aside class="positive">
-BEST PRACTICE: Use the <ActionName>Request as input name. This makes the link between them very obvious. For outputs, if the type of return cannot be shared (it's something specific to your action), use <ActionName>Result. Examples of shared/common results are StatEntry (file metadata), BufferReference (partial file content).
+BEST PRACTICE: Use the Request as input name. This makes the link between them very obvious. For outputs, if the type of return cannot be shared (it's something specific to your action), use Response. Examples of shared/common results are StatEntry (file metadata), BufferReference (partial file content).
 </aside>
 
 You'll need to define a ```.proto``` and an equivalent ```RDFValue``` for them. Let's go through [an example](https://github.com/google/grr/blob/master/grr/proto/grr_response_proto/dummy.proto):
 
+[https://github.com/google/grr/blob/master/grr/proto/grr_response_proto/dummy.proto](https://github.com/google/grr/blob/master/grr/proto/grr_response_proto/dummy.proto)
 ```protobuf
 message DummyRequest {
   optional string action_input = 1;
@@ -45,9 +46,10 @@ message DummyResult {
 Next, let's add the corresponding ```RDFValue``` [classes](https://github.com/google/grr/blob/master/grr/core/grr_response_core/lib/rdfvalues/dummy.py). They inherit from ```RDFProtoStruct```, and must have the ```protobuf``` property set. If your proto depends on other ```RDFValues``` (e.g. other protos), you should add them to the list of dependencies in ```rdf_deps``` ([example](https://github.com/google/grr/blob/a6f1b31abfe82794b7d82fa8d54d8bd94bfed1bb/grr/server/grr_response_server/gui/api_plugins/flow.py#L466C3-L466C11)).
 
 <aside class="positive">
-NOTE: RDFValues are a Python class wrapper on top of Protos. At the time they were created, Python proto library was much more limited than it is today (yes, GRR is old). RDFValues exist for legacy reasons and are still used throughout GRR's codebase.
+NOTE: RDFValues are a Python class wrapper on top of Protos. At the time they were created, the Python proto library was much more limited than it is today (yes, GRR is old). RDFValues exist for legacy reasons and are still used throughout GRR's codebase.
 </aside>
 
+[https://github.com/google/grr/blob/master/grr/core/grr_response_core/lib/rdfvalues/dummy.py](https://github.com/google/grr/blob/master/grr/core/grr_response_core/lib/rdfvalues/dummy.py)
 ```python
 #!/usr/bin/env python
 """The various Dummy example rdfvalues."""
@@ -70,11 +72,11 @@ class DummyResult(rdf_structs.RDFProtoStruct):
   rdf_deps = []
 ```
 
-An important detail is that for Client Actions, we prefer adding the class to a separate file (see below). This is because we need to import it in both the server and the client. For Flows, we usually prefer to define them close to the Flow class definition themselves (see more on [Adding Flows](../how-to-add-a-flow/index.html)).
+An important detail is that for Client Actions, we prefer adding the class to a separate file. This is because we need to import it in both the server and the client. For Flows, we usually prefer to define them close to the Flow class definition themselves (see more on [Adding Flows](../how-to-add-a-flow/index.html)).
 
 <!-- ------------------------ -->
 ## Writing the Client Action class
-Duration: 3
+Duration: 5
 
 Client Actions are classes that inherit from [```ActionPlugin```](https://github.com/google/grr/blob/a6f1b31abfe82794b7d82fa8d54d8bd94bfed1bb/grr/client/grr_response_client/actions.py#L78). The class must override:
 
@@ -92,6 +94,7 @@ Whith that in mind, let's write our Dummy client action. The action will be simp
 
 Our action will be the same for Linux and MacOS (Unix). So, we'll add it to the [common/shared directory](https://github.com/google/grr/blob/master/grr/client/grr_response_client/client_actions/dummy.py).
 
+[https://github.com/google/grr/blob/master/grr/client/grr_response_client/client_actions/dummy.py](https://github.com/google/grr/blob/master/grr/client/grr_response_client/client_actions/dummy.py)
 ```python
 class Dummy(actions.ActionPlugin):
   """Returns the received string."""
@@ -113,13 +116,14 @@ class Dummy(actions.ActionPlugin):
 ```
 
 <aside class="positive">
-NOTE: On our example, we return a single response. In real life, you might want to send multiple responses (even of different types). You can consider this in your design, and take a look at existing actions that have multiple types in out_rdfvalues.
+NOTE: In our example, we return a single response. In real life, you might want to send multiple responses (even of different types). You can consider this in your design, and take a look at existing actions that have multiple types in out_rdfvalues.
 </aside>
 
 ### Writing the platform-specific (Windows) implementation
 
-For Windows, we will write a [dedicated action](https://github.com/google/grr/blob/master/grr/client/grr_response_client/client_actions/windows/dummy.py). It'll live in the windows folder. For
+For Windows, we will write a [dedicated action](https://github.com/google/grr/blob/master/grr/client/grr_response_client/client_actions/windows/dummy.py). It'll live in the windows folder.
 
+[https://github.com/google/grr/blob/master/grr/client/grr_response_client/client_actions/windows/dummy.py](https://github.com/google/grr/blob/master/grr/client/grr_response_client/client_actions/windows/dummy.py)
 ```python
 class Dummy(actions.ActionPlugin):
   """Returns the received string."""
@@ -142,7 +146,7 @@ class Dummy(actions.ActionPlugin):
 
 <!-- ------------------------ -->
 ## Writing the Client Action unit tests
-Duration: 1
+Duration: 4
 
 ### Unix implementation unit tests
 
@@ -154,8 +158,9 @@ IMPORTANT: ALWAYS submit your tests together with the code.
 
 Whenever a Client Action reaches the end of the processing, the Client sends a Status message back to the server. This is usually the last message sent to the server.
 
-On our unit tests below, we're including this message in the tests. On the successful test case, we also test the status code is ```OK```. On the failure scenario, we test that it returned a ```GENERIC_ERROR``` (since we raise a ```RuntimeException``` in the action). ```Status``` messages can have other values as well (e.g. reached a limit). You can take a look at other actions and the proto to see how else it can be used.
+In our unit tests below, we're including this message in the tests. In the successful test case, we also test the status code is ```OK```. In the failure scenario, we test that it returned a ```GENERIC_ERROR``` (since we raise a ```RuntimeException``` in the action). ```Status``` messages can have other values as well (e.g. reached a limit). You can take a look at other actions and the proto to see how else it can be used.
 
+[https://github.com/google/grr/blob/master/grr/client/grr_response_client/client_actions/dummy_test.py](https://github.com/google/grr/blob/master/grr/client/grr_response_client/client_actions/dummy_test.py)
 ```python
   def testDummyReceived(self):
     action_request = rdf_dummy.DummyRequest(action_input="banana")
@@ -193,6 +198,7 @@ On our unit tests below, we're including this message in the tests. On the succe
 
 For Windows, we're doing exactly the [same as the above](https://github.com/google/grr/blob/master/grr/client/grr_response_client/client_actions/windows/dummy_test.py), except for some extra assertions that match the Client Action behavior on Windows.
 
+[https://github.com/google/grr/blob/master/grr/client/grr_response_client/client_actions/windows/dummy_test.py](https://github.com/google/grr/blob/master/grr/client/grr_response_client/client_actions/windows/dummy_test.py)
 ```python
 def testDummyReceived(self):
     action_request = rdf_dummy.DummyRequest(action_input="banana")
@@ -229,15 +235,18 @@ def testDummyReceived(self):
 
 <!-- ------------------------ -->
 ## Registering your Client Action
-Duration: 1
+Duration: 5
 
-Now that we have an implemented and tested action, we can register it so it is available to be called (cl/559042698)! Hooray!
+Now that we have an implemented and tested action, we can register it so it is available to be called! Hooray!
 
 For that you need to add it to the following places:
 
-To the [```server_stubs```](https://github.com/google/grr/blob/master/grr/server/grr_response_server/server_stubs.py#L54). The stub must have the same name, ```in_``` and ```out_rdfvalues``` as your class declared on the previous step.
+To the [```server_stubs```](https://github.com/google/grr/blob/master/grr/server/grr_response_server/server_stubs.py). The stub must have the same name, ```in_``` and ```out_rdfvalues``` as your class declared on the previous step.
 
+[https://github.com/google/grr/blob/master/grr/server/grr_response_server/server_stubs.py](https://github.com/google/grr/blob/master/grr/server/grr_response_server/server_stubs.py)
 ```python
+from grr_response_core.lib.rdfvalues import dummy as rdf_dummy
+
 class Dummy(ClientActionStub):
   """Dummy example. Reads a message and sends it back."""
 
@@ -245,12 +254,14 @@ class Dummy(ClientActionStub):
   out_rdfvalues = [rdf_dummy.DummyResult]
 ```
 
-To the [```action_registry```](https://github.com/google/grr/blob/a6f1b31abfe82794b7d82fa8d54d8bd94bfed1bb/grr/server/grr_response_server/action_registry.py#L10) and [```registry_init```](https://github.com/google/grr/blob/a6f1b31abfe82794b7d82fa8d54d8bd94bfed1bb/grr/client/grr_response_client/client_actions/registry_init.py#L74). The registry key should also have the same class name. Note that, we're registering this implementation for both Linux and Darwin, but will do something different for Windows (see next step).
+To the [```action_registry```](https://github.com/google/grr/blob/a6f1b31abfe82794b7d82fa8d54d8bd94bfed1bb/grr/server/grr_response_server/action_registry.py#L10) and [```registry_init```](https://github.com/google/grr/blob/a6f1b31abfe82794b7d82fa8d54d8bd94bfed1bb/grr/client/grr_response_client/client_actions/registry_init.py#L74). The registry key should also have the same class name. Note that, we're registering this implementation for both Linux and Darwin, but will do something different for Windows (see 'Registering platform-specific' section below).
 
+[https://github.com/google/grr/blob/master/grr/server/grr_response_server/action_registry.py](https://github.com/google/grr/blob/master/grr/server/grr_response_server/action_registry.py)
 ```python
    "Dummy": server_stubs.Dummy,
 ```
 
+[https://github.com/google/grr/blob/master/grr/client/grr_response_client/client_actions/registry_init.py](https://github.com/google/grr/blob/master/grr/client/grr_response_client/client_actions/registry_init.py)
 ```python
 client_actions.Register("Dummy", dummy.Dummy)
 ```
@@ -259,12 +270,13 @@ client_actions.Register("Dummy", dummy.Dummy)
 
 Notice that when registering it, we'll register it on the [```Windows```] [section](https://github.com/google/grr/blob/a6f1b31abfe82794b7d82fa8d54d8bd94bfed1bb/grr/client/grr_response_client/client_actions/registry_init.py#L87) of the code.
 
+[https://github.com/google/grr/blob/master/grr/client/grr_response_client/client_actions/registry_init.py](https://github.com/google/grr/blob/master/grr/client/grr_response_client/client_actions/registry_init.py)
 ```python
 client_actions.Register("Dummy", win_dummy.Dummy)
 ```
 
 <!-- ------------------------ -->
 ## ... And now to call it from a Flow!
-Duration: 1
+Duration: 3
 
 That's it, your Client Action is complete! Now you can start using it in an existing or new Flow! See [Adding a Flow](../how-to-add-a-flow/index.html)
