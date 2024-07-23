@@ -58,4 +58,4 @@ claat serve
 # Serving codelabs on localhost:9090, opening browser tab now...
 ```
 
-You can now access the codelabs by pointing your browser to the static HTML files.
+You can now access the Codelabs by pointing your browser to [http://localhost:9090](http://localhost:9090)
