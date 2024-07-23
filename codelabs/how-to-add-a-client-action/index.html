@@ -239,7 +239,9 @@ class Dummy(ClientActionStub):
 <pre><code language="language-python" class="language-python">   &#34;Dummy&#34;: server_stubs.Dummy,
 </code></pre>
 <p><a href="https://github.com/google/grr/blob/master/grr/client/grr_response_client/client_actions/registry_init.py" target="_blank">https://github.com/google/grr/blob/master/grr/client/grr_response_client/client_actions/registry_init.py</a></p>
-<pre><code language="language-python" class="language-python">client_actions.Register(&#34;Dummy&#34;, dummy.Dummy)
+<pre><code language="language-python" class="language-python">from grr_response_client.client_actions import dummy
+
+client_actions.Register(&#34;Dummy&#34;, dummy.Dummy)
 </code></pre>
 <h2 is-upgraded>Registering platform-specific</h2>
 <p>Notice that when registering it, we&#39;ll register it on the [<code>Windows</code>] <a href="https://github.com/google/grr/blob/a6f1b31abfe82794b7d82fa8d54d8bd94bfed1bb/grr/client/grr_response_client/client_actions/registry_init.py#L87" target="_blank">section</a> of the code.</p>

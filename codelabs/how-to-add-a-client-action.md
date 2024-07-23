@@ -263,6 +263,8 @@ To the [```action_registry```](https://github.com/google/grr/blob/a6f1b31abfe827
 
 [https://github.com/google/grr/blob/master/grr/client/grr_response_client/client_actions/registry_init.py](https://github.com/google/grr/blob/master/grr/client/grr_response_client/client_actions/registry_init.py)
 ```python
+from grr_response_client.client_actions import dummy
+
 client_actions.Register("Dummy", dummy.Dummy)
 ```
 
