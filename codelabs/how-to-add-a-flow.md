@@ -289,12 +289,6 @@ To [```utils```](https://github.com/google/grr/blob/a6f1b31abfe82794b7d82fa8d54d
 from grr_response_proto import dummy_pb2
 ```
 
-When a new Flow is registered, you will also need to add the new protos to the UI code. You can do that by running:
-
-```python
-
-```
-
 <!-- ------------------------ -->
 ## Writing the Flow end to end tests
 Duration: 5
