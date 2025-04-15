@@ -147,6 +147,7 @@ def BuildWithPyInstaller(context=None):
       config.CONFIG.Get("PyInstaller.workpath_dir", context=context),
       spec_file,
   ]
+  PyInstallerMain.compat.PY3_BASE_MODULES.add('ipaddress')
   logging.info("Running pyinstaller: %s", args)
   PyInstallerMain.run(pyi_args=args)
 
