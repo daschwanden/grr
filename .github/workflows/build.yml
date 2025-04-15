@@ -237,6 +237,7 @@ jobs:
     runs-on: ubuntu-22.04
     needs:
       - test-ubuntu
+      - build-docker-image
     steps:
       - uses: actions/checkout@v4
       - name: Download artifact
