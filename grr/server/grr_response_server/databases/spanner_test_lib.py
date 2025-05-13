@@ -45,8 +45,8 @@ def Init(sdl_path: str) -> None:
     raise AssertionError("Spanner test library already initialized")
 
   project_id = _GetEnvironOrSkip("PROJECT_ID")
-  instance_id = _GetEnvironOrSkip("SPANNER_TEST_INSTANCE")
-  database_id = _GetEnvironOrSkip("SPANNER_TEST_DATABASE")
+  instance_id = _GetEnvironOrSkip("SPANNER_GRR_INSTANCE")
+  database_id = _GetEnvironOrSkip("SPANNER_GRR_DATABASE")
 
   spanner_client = Client(project_id)
   database_admin_api = spanner_client.database_admin_api
