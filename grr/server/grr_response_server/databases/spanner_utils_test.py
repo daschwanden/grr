@@ -17,7 +17,7 @@ from grr_response_server.databases import spanner_test_lib
 from grr_response_server.databases import spanner_utils
 
 def setUpModule() -> None:
-  spanner_test_lib.Init(spanner_test_lib.TEST_SCHEMA_SDL_PATH)
+  spanner_test_lib.Init(spanner_test_lib.TEST_SCHEMA_SDL_PATH, False)
 
 
 def tearDownModule() -> None:
