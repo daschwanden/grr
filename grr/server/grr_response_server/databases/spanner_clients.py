@@ -15,7 +15,7 @@ from grr_response_server.databases import db as db_lib
 from grr_response_server.databases import db_utils
 from grr_response_server.databases import spanner_utils
 from grr_response_server.models import clients as models_clients
-from rrg.proto.rrg import startup_pb2 as rrg_startup_pb2
+from grr_response_proto.rrg import startup_pb2 as rrg_startup_pb2
 
 
 class ClientsMixin:
@@ -287,7 +287,7 @@ class ClientsMixin:
 
 
 
-def IntClientID(client_id: str) -> spanner_lib.UInt64:
+def IntClientID(client_id: str) -> int:
   """Converts a client identifier to its integer representation.
 
   This function wraps the value in PySpanner's `UInt64` wrapper. It is needed
@@ -300,7 +300,7 @@ def IntClientID(client_id: str) -> spanner_lib.UInt64:
   Returns:
     An integer representation of the given client identifier.
   """
-  return spanner_lib.UInt64(db_utils.ClientIDToInt(client_id))
+  return db_utils.ClientIDToInt(client_id)
 
 
 _EPOCH = datetime.datetime.fromtimestamp(0, datetime.timezone.utc)

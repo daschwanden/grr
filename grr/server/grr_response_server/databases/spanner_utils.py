@@ -21,6 +21,8 @@ from google.cloud.spanner import KeyRange, KeySet
 from google.cloud.spanner_admin_database_v1.types import spanner_database_admin
 from google.cloud.spanner_v1 import Mutation, param_types
 
+from google.rpc.code_pb2 import OK
+
 from grr_response_core.lib.util import collection
 from grr_response_core.lib.util import iterator
 
@@ -373,7 +375,9 @@ class Database:
         columns=columns,
         values=[values]
       )
-      groups.batch_write()
+      for response in groups.batch_write():
+        if response.status.code != OK:
+          raise Exception(response.status.message)
 
   def Delete(
       self, table: str, key: Sequence[Any], txn_tag: Optional[str] = None

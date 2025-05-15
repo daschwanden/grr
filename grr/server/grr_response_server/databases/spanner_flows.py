@@ -18,7 +18,7 @@ from grr_response_server.databases import db_utils
 from grr_response_server.databases import spanner_clients
 from grr_response_server.databases import spanner_utils
 from grr_response_server.models import hunts as models_hunts
-from rrg.proto import rrg_pb2
+from grr_response_proto import rrg_pb2
 
 class FlowsMixin:
   """A Spanner database mixin with implementation of flow methods."""
@@ -70,20 +70,24 @@ class FlowsMixin:
       self,
       client_id: str,
       flow_id: str,
-      flow_obj: Union[flows_pb2.Flow, _UNCHANGED_TYPE] = _UNCHANGED,
+      flow_obj: Union[
+          flows_pb2.Flow, db.Database.UNCHANGED_TYPE
+      ] = db.Database.UNCHANGED,
       flow_state: Union[
-          flows_pb2.Flow.FlowState.ValueType, _UNCHANGED_TYPE
-      ] = _UNCHANGED,
+          flows_pb2.Flow.FlowState.ValueType, db.Database.UNCHANGED_TYPE
+      ] = db.Database.UNCHANGED,
       client_crash_info: Union[
-          jobs_pb2.ClientCrash, _UNCHANGED_TYPE
-      ] = _UNCHANGED,
-      processing_on: Optional[Union[str, _UNCHANGED_TYPE]] = _UNCHANGED,
+          jobs_pb2.ClientCrash, db.Database.UNCHANGED_TYPE
+      ] = db.Database.UNCHANGED,
+      processing_on: Optional[
+          Union[str, db.Database.UNCHANGED_TYPE]
+      ] = db.Database.UNCHANGED,
       processing_since: Optional[
-          Union[rdfvalue.RDFDatetime, _UNCHANGED_TYPE]
-      ] = _UNCHANGED,
+          Union[rdfvalue.RDFDatetime, db.Database.UNCHANGED_TYPE]
+      ] = db.Database.UNCHANGED,
       processing_deadline: Optional[
-          Union[rdfvalue.RDFDatetime, _UNCHANGED_TYPE]
-      ] = _UNCHANGED,
+          Union[rdfvalue.RDFDatetime, db.Database.UNCHANGED_TYPE]
+      ] = db.Database.UNCHANGED,
   ) -> None:
     """Updates flow objects in the database."""
 
@@ -495,13 +499,6 @@ class FlowsMixin:
     results = []
     return results
 
-  def _BuildDeleteMessageHandlerRequestWrites(
-      self,
-      txn: spanner_utils.Transaction,
-      requests: Iterable[objects_pb2.MessageHandlerRequest],
-  ) -> None:
-    """Deletes given requests within a given transaction."""
-
 
 
   @db_utils.CallLogged
@@ -526,11 +523,6 @@ class FlowsMixin:
   ) -> None:
     """Unregisters any registered message handler."""
 
-
-  def _ReadHuntState(
-      self, txn: spanner_utils.Transaction, hunt_id: str
-  ) -> Optional[int]:
-    return None
 
   @db_utils.CallLogged
   @db_utils.CallAccounted

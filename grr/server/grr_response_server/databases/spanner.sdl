@@ -537,7 +537,8 @@ CREATE TABLE YaraSignatureReferences(
     CHECK (BYTE_LENGTH(BlobId) = 32),
   CONSTRAINT fk_yara_signature_reference_creator_username
     FOREIGN KEY (Creator)
-    REFERENCES Users(Username),
+    REFERENCES Users(Username)
+    ENFORCED
 ) PRIMARY KEY (BlobId);
 
 CREATE TABLE Hunts(

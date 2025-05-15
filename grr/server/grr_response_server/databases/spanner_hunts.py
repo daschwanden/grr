@@ -13,7 +13,7 @@ from grr_response_proto import output_plugin_pb2
 from grr_response_server.databases import db as abstract_db
 from grr_response_server.databases import db_utils
 from grr_response_server.databases import spanner_flows
-from rr_response_server.databases import spanner_utils
+from grr_response_server.databases import spanner_utils
 from grr_response_server.models import hunts as models_hunts
 
 
@@ -73,7 +73,9 @@ class HuntsMixin:
       with_description_match: Optional[str] = None,
       created_by: Optional[AbstractSet[str]] = None,
       not_created_by: Optional[AbstractSet[str]] = None,
-      with_states: Optional[Collection[hunts_pb2.Hunt.HuntState]] = None,
+      with_states: Optional[
+          Collection[hunts_pb2.Hunt.HuntState.ValueType]
+      ] = None,
   ) -> List[hunts_pb2.Hunt]:
     """Reads hunt objects from the database."""
 

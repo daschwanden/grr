@@ -33,7 +33,24 @@ class UsersMixin:
       ui_mode: Optional["user_pb2.GUISettings.UIMode"] = None,
   ) -> None:
     """Writes user object for a user with a given name."""
+    row = {"Username": username}
 
+    if email is not None:
+      row["Email"] = email
+
+    if password is not None:
+      row["Password"] = password
+
+    if user_type is not None:
+      row["Type"] = int(user_type)
+
+    if ui_mode is not None:
+      row["UiMode"] = int(ui_mode)
+
+    if canary_mode is not None:
+      row["CanaryMode"] = canary_mode
+
+    self.db.InsertOrUpdate(table="Users", row=row, txn_tag="WriteGRRUser")
 
 
   @db_utils.CallLogged

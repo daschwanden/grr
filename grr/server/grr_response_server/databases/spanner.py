@@ -1,11 +1,13 @@
 # Imports the Google Cloud Client Library.
 from google.cloud import spanner
 
+from grr_response_core.lib import rdfvalue
 from grr_response_server.databases import db as abstract_db
 from grr_response_server.databases import spanner_artifacts
 from grr_response_server.databases import spanner_blob_keys
+from grr_response_server.databases import spanner_blob_references
 from grr_response_server.databases import spanner_clients
-from grr_response_server.databases import spanner_cronjobs
+from grr_response_server.databases import spanner_cron_jobs
 from grr_response_server.databases import spanner_events
 from grr_response_server.databases import spanner_flows
 from grr_response_server.databases import spanner_foreman_rules
