@@ -82,7 +82,10 @@ class DatabaseTestBlobReferencesMixin(object):
   def testWriteHashBlobHandlesLargeAmountsOfData(self):
     hash_id_blob_refs = {}
 
-    for _ in range(50000):
+    # Limit to 16k records to stay within Spanner 80k mutation/commit limit
+    # https://cloud.google.com/spanner/quotas#limits-for
+    # 16k records * 5 columns = 80k mutations/commit
+    for _ in range(16000):
       hash_id = rdf_objects.SHA256HashID(os.urandom(32))
 
       blob_ref = objects_pb2.BlobReference()
