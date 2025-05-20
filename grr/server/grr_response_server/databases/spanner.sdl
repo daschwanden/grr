@@ -667,5 +667,5 @@ CREATE TABLE SignedCommands(
   Id STRING(128) NOT NULL,
   OperatingSystem `grr.SignedCommand.OS` NOT NULL,
   Ed25519Signature BYTES(64) NOT NULL,
-  Command `rrg.action.execute_signed_command.Command` NOT NULL,
+  Command BYTES(MAX) NOT NULL,
 ) PRIMARY KEY (Id, OperatingSystem);
