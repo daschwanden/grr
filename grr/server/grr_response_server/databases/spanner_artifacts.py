@@ -106,4 +106,3 @@ class ArtifactsMixin:
       txn.delete("Artifacts", keyset)
 
     self.db.Transact(Transaction, txn_tag="DeleteArtifact")
-
