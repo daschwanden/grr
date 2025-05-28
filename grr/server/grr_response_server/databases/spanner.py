@@ -1,8 +1,8 @@
 # Imports the Google Cloud Client Library.
-from google.cloud import spanner
+from google.cloud.spanner import Client
 
 from grr_response_core.lib import rdfvalue
-from grr_response_server.databases import db as abstract_db
+from grr_response_server.databases import db as db_module
 from grr_response_server.databases import spanner_artifacts
 from grr_response_server.databases import spanner_blob_keys
 from grr_response_server.databases import spanner_blob_references
@@ -36,7 +36,7 @@ class SpannerDB(
     spanner_signed_binaries.SignedBinariesMixin,
     spanner_users.UsersMixin,
     spanner_yara.YaraMixin,
-    abstract_db.Database,
+    db_module.Database,
 ):
   """A Spanner implementation of the GRR database."""
 
@@ -44,6 +44,19 @@ class SpannerDB(
     """Initializes the database."""
     self.db = db
     self._write_rows_batch_size = 10000
+
+  @classmethod
+  def FromConfig(cls) -> "Database":
+    """Creates a GRR database instance for Spanner path specified in the config.
+
+    Returns:
+      A GRR database instance.
+    """
+    spanner_client = Client(onfig.CONFIG["ProjectID"])
+    spanner_instance = spanner_client.instance(config.CONFIG["Spanner.instance"])
+    spanner_database = spanner_instance.database(config.CONFIG["Spanner.database"])
+
+    return cls(spanner_utils.Database(spanner_database))
 
   def Now(self) -> rdfvalue.RDFDatetime:
     """Retrieves current time as reported by the database."""

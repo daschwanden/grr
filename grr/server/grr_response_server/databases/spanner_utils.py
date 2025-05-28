@@ -18,6 +18,8 @@ from typing import Tuple
 from typing import Type
 from typing import TypeVar
 
+from concurrent import futures
+from google.cloud import pubsub_v1
 from google.cloud import spanner_v1 as spanner_lib
 from google.cloud.spanner import KeyRange, KeySet
 from google.cloud.spanner_admin_database_v1.types import spanner_database_admin
@@ -32,6 +34,54 @@ Row = Tuple[Any, ...]
 Cursor = Iterator[Row]
 
 _T = TypeVar("_T")
+
+class QueueReceiver:
+  """
+  This stores the callback internally, and will continue to deliver messages to
+  the callback as long as it is referenced in python code and Stop is not
+  called.
+  """
+
+  def __init__(
+      self,
+      queue_type: str,
+      callback,  # : Callable[[spanner.KeyBuilder, List[Any], Any, bytes,
+      receiver_max_keepalive_seconds: int,
+      receiver_max_active_callbacks: int,
+      receiver_max_messages_per_callback: int,
+  ):
+    # An optional executor to use. If not specified, a default one with maximum 10
+    # threads will be created.
+    executor = futures.ThreadPoolExecutor(max_workers=receiver_max_messages_per_callback)
+    # A thread pool-based scheduler. It must not be shared across SubscriberClients.
+    scheduler = pubsub_v1.subscriber.scheduler.ThreadScheduler(executor)
+
+    subscriber = pubsub_v1.SubscriberClient()
+    subscription_path = subscriber.subscription_path(project_id, subscription_id)
+
+    def subcallback(message: pubsub_v1.subscriber.message.Message) -> None:
+      callback()
+      message.ack()
+
+    flow_control = pubsub_v1.types.FlowControl(max_messages=receiver_max_messages_per_callback)
+
+    streaming_pull_future = subscriber.subscribe(
+      subscription_path, callback=subcallback, scheduler=scheduler, flow_control=flow_control
+    )
+
+  # Wrap subscriber in a 'with' block to automatically call close() when done.
+  with subscriber:
+    try:
+        # When `timeout` is not set, result() will block indefinitely,
+        # unless an exception is encountered first.
+        streaming_pull_future.result(timeout=receiver_max_keepalive_seconds)
+    except TimeoutError:
+        streaming_pull_future.cancel()  # Trigger the shutdown.
+        streaming_pull_future.result()  # Block until the shutdown is complete.
+
+  def Stop(self):
+    streaming_pull_future.cancel()
+
 
 class Database:
   """A wrapper around the PySpanner class.
