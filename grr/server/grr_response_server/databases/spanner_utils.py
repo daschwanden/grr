@@ -4,6 +4,7 @@ import contextlib
 import datetime
 import decimal
 import re
+import time
 
 from typing import Any
 from typing import Callable
@@ -19,8 +20,10 @@ from typing import Type
 from typing import TypeVar
 
 from concurrent import futures
+
 from google.cloud import pubsub_v1
 from google.cloud import spanner_v1 as spanner_lib
+
 from google.cloud.spanner import KeyRange, KeySet
 from google.cloud.spanner_admin_database_v1.types import spanner_database_admin
 from google.cloud.spanner_v1 import Mutation, param_types
@@ -30,12 +33,16 @@ from google.rpc.code_pb2 import OK
 from grr_response_core.lib.util import collection
 from grr_response_core.lib.util import iterator
 
+from grr_response_proto import flows_pb2
+from grr_response_proto import objects_pb2
+
 Row = Tuple[Any, ...]
 Cursor = Iterator[Row]
 
 _T = TypeVar("_T")
 
-class QueueReceiver:
+
+class RequestQueue:
   """
   This stores the callback internally, and will continue to deliver messages to
   the callback as long as it is referenced in python code and Stop is not
@@ -44,43 +51,64 @@ class QueueReceiver:
 
   def __init__(
       self,
-      queue_type: str,
-      callback,  # : Callable[[spanner.KeyBuilder, List[Any], Any, bytes,
+      project_id: str,
+      topic_id: str,
+      subscription_id: str,
+      callback,  # : Callable
       receiver_max_keepalive_seconds: int,
       receiver_max_active_callbacks: int,
       receiver_max_messages_per_callback: int,
   ):
+    self.project_id = project_id
+    self.topic_id = topic_id
+    self.subscriber = pubsub_v1.SubscriberClient()
+    subscription_path = self.subscriber.subscription_path(project_id, subscription_id)
+
+    def queueCallback(message: pubsub_v1.subscriber.message.Message) -> None:
+      callback(message.data)
+
     # An optional executor to use. If not specified, a default one with maximum 10
     # threads will be created.
     executor = futures.ThreadPoolExecutor(max_workers=receiver_max_messages_per_callback)
     # A thread pool-based scheduler. It must not be shared across SubscriberClients.
     scheduler = pubsub_v1.subscriber.scheduler.ThreadScheduler(executor)
 
-    subscriber = pubsub_v1.SubscriberClient()
-    subscription_path = subscriber.subscription_path(project_id, subscription_id)
-
-    def subcallback(message: pubsub_v1.subscriber.message.Message) -> None:
-      callback()
-      message.ack()
-
     flow_control = pubsub_v1.types.FlowControl(max_messages=receiver_max_messages_per_callback)
 
-    streaming_pull_future = subscriber.subscribe(
-      subscription_path, callback=subcallback, scheduler=scheduler, flow_control=flow_control
+    self.streaming_pull_future = self.subscriber.subscribe(
+      subscription_path, callback=queueCallback, scheduler=scheduler, flow_control=flow_control
     )
 
-  # Wrap subscriber in a 'with' block to automatically call close() when done.
-  with subscriber:
-    try:
-        # When `timeout` is not set, result() will block indefinitely,
-        # unless an exception is encountered first.
-        streaming_pull_future.result(timeout=receiver_max_keepalive_seconds)
-    except TimeoutError:
-        streaming_pull_future.cancel()  # Trigger the shutdown.
-        streaming_pull_future.result()  # Block until the shutdown is complete.
+  def publish(self, data: str) -> None:
+    publisher = pubsub_v1.PublisherClient()
+    topic_path = publisher.topic_path(self.project_id, self.topic_id)
+    publisher.publish(topic_path, data.encode("utf-8"))
+
+  def pull(self):
+    # Create a client
+    client = pubsub_v1.SubscriberClient()
+    # Initialize request argument(s)
+    request = pubsub_v1.PullRequest(
+      subscription=subscription_path,
+      return_immediately=True,
+      max_messages=10000,
+    )
+    # Make the request
+    response = client.pull(request=request)
 
   def Stop(self):
-    streaming_pull_future.cancel()
+    if self.streaming_pull_future:
+      try:
+        self.streaming_pull_future.cancel()
+      except asyncio.CancelledError:
+        pass # Expected when cancelling
+      except Exception as e:
+        print(f"Warning: Exception while cancelling future: {e}")
+
+    if self.subscriber:
+      self.subscriber.close()
+      # Add a small sleep to allow threads to fully terminate
+      time.sleep(0.1) # Give a short buffer for threads to clean up
 
 
 class Database:
@@ -93,9 +121,16 @@ class Database:
 
   _PYSPANNER_PARAM_REGEX = re.compile(r"@p\d+") 
 
-  def __init__(self, pyspanner: spanner_lib.database) -> None:
+  def __init__(self, pyspanner: spanner_lib.database, project_id: str,
+               msg_handler_top_id: str, msg_handler_sub_id: str,
+               flow_processing_top_id: str, flow_processing_sub_id: str) -> None:
     super().__init__()
     self._pyspanner = pyspanner
+    self.project_id = project_id
+    self.msg_handler_top_id = msg_handler_top_id
+    self.msg_handler_sub_id = msg_handler_sub_id
+    self.flow_processing_top_id = flow_processing_top_id
+    self.flow_processing_sub_id = flow_processing_sub_id
 
   def _parametrize(self, query: str, names: Iterable[str]) -> str:
     match = self._PYSPANNER_PARAM_REGEX.search(query)
@@ -517,3 +552,56 @@ class Database:
         )
     
     return results
+
+  def NewRequestQueue(
+      self,
+      queue: str,
+      callback: Callable[[Sequence[Any], bytes], None],
+      receiver_max_keepalive_seconds: Optional[int] = None,
+      receiver_max_active_callbacks: Optional[int] = None,
+      receiver_max_messages_per_callback: Optional[int] = None,
+  ) -> RequestQueue:
+    """Registers a queue callback in a given queue.
+
+    Args:
+      queue: Name of the queue.
+      callback: Callback with 2 args (expanded_key, payload). expanded_key is a
+        sequence where each item corresponds to an item of the message's key.
+        Payload is the message itself, serialized as bytes.
+      receiver_max_keepalive_seconds: Num seconds before the lease on the
+        message expires (if the message is not acked before the lease expires,
+        it will be delivered again).
+      receiver_max_active_callbacks: Max number of callback to be called in
+        parallel.
+      receiver_max_messages_per_callback: Max messages to receive per callback.
+
+    Returns:
+      New queue receiver objects.
+    """
+
+    def _Callback(data: str):
+      data = data.decode("utf-8")
+      if queue == "":
+        payload = data
+      elif queue == "MessageHandler":
+        payload = objects_pb2.MessageHandlerRequest.ParseFromString(data)
+      elif queue == "FlowProcessing":
+        payload = flows_pb2.FlowProcessingRequest.ParseFromString(data)
+      callback(payload)
+
+    if queue == "MessageHandler" or queue == "":
+      topic_id = self.msg_handler_top_id
+      subscription_id = self.msg_handler_sub_id
+    elif queue == "FlowProcessing":
+      topic_id = self.flow_processing_top_id
+      subscription_id = self.flow_processing_sub_id
+
+    return RequestQueue(
+        self.project_id,
+        topic_id,
+        subscription_id,
+        _Callback,
+        receiver_max_keepalive_seconds=receiver_max_keepalive_seconds,
+        receiver_max_active_callbacks=receiver_max_active_callbacks,
+        receiver_max_messages_per_callback=receiver_max_messages_per_callback,
+    )

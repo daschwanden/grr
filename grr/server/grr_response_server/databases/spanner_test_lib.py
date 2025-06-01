@@ -94,8 +94,8 @@ def Init(sdl_path: str, proto_bundle: bool) -> None:
 def TearDown() -> None:
   """Tears down the Spanner testing environment.
 
-  This must be called once per process after all the tests. A `tearDownModule`
-  is a perfect place for it.
+  This must be called once per process after all the tests.
+  A `tearDownModule` is a perfect place for it.
   """
   if _TEST_DB is not None:
     # Create a client
@@ -112,58 +112,43 @@ class TestCase(absltest.TestCase):
   def setUp(self):
     super().setUp()
 
-    self.raw_db = spanner_utils.Database(CreateTestDatabase())
+    project_id = _GetEnvironOrSkip("PROJECT_ID")
+    msg_handler_top_id = _GetEnvironOrSkip("MESSAGE_HANDLER_TOPIC_ID")
+    msg_handler_sub_id = _GetEnvironOrSkip("MESSAGE_HANDLER_SUBSCRIPTION_ID")
+    flow_processing_top_id = _GetEnvironOrSkip("FLOW_PROCESSING_TOPIC_ID")
+    flow_processing_sub_id = _GetEnvironOrSkip("FLOW_PROCESSING_SUBSCRIPTION_ID")
 
-    db = spanner_db.SpannerDB(self.raw_db)
-    self.db = abstract_db.DatabaseValidationWrapper(db)
+    _clean_database()
+
+    self.raw_db = spanner_utils.Database(_TEST_DB, project_id,
+                                         msg_handler_top_id, msg_handler_sub_id,
+                                         flow_processing_top_id, flow_processing_sub_id)
+
+    spannerDB = spanner_db.SpannerDB(self.raw_db)
+    self.db = abstract_db.DatabaseValidationWrapper(spannerDB)
 
 
-def CreateTestDatabase() -> spanner_lib.database:
-  """Creates an empty test spanner database.
+def _get_table_names(db):
+    with db.snapshot() as snapshot:
+        query_result = snapshot.execute_sql(
+            "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_TYPE = 'BASE TABLE';"
+        )
+        table_names = set()
+        for row in query_result:
+            table_names.add(row[0])
 
-  Returns:
-    A PySpanner instance pointing to the created database.
-  """
-  #if _TEST_DB is None:
-  #  raise AssertionError("Spanner test database not initialized")
+        return table_names
 
-  db = spanner_utils.Database(_TEST_DB)
 
-  query = """
-  SELECT t.table_name
-    FROM information_schema.tables AS t
-   WHERE t.table_catalog = ""
-     AND t.table_schema = ""
-   ORDER BY t.table_name ASC
-  """
+def _clean_database() -> None:
+  """Creates an empty test spanner database."""
 
-  table_names = set()
-  for (table_name,) in db.Query(query):
-    table_names.add(table_name)
-
-  query = """
-  SELECT v.table_name
-    FROM information_schema.views AS v
-   WHERE v.table_catalog = ""
-     AND v.table_schema = ""
-   ORDER BY v.table_name ASC
-  """
-  view_names = set()
-  for (view_name,) in db.Query(query):
-    view_names.add(view_name)
-
-  # `table_names` is a superset of `view_names` (since the `VIEWS` table is,
-  # well, just a view to the `TABLES` table [1]). Since deleting from views
-  # makes no sense, we have to exclude them from the tables we want to clean.
-  table_names -= view_names
-  
+  table_names = _get_table_names(_TEST_DB)
   keyset = KeySet(all_=True)
 
   with _TEST_DB.batch() as batch:
     # Deletes sample data from all tables in the given database.
     for table_name in table_names:
       batch.delete(table_name, keyset)
-
-  return _TEST_DB
 
 _TEST_DB: spanner_lib.database = None

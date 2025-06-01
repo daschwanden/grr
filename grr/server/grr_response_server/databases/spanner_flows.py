@@ -229,22 +229,22 @@ class FlowsMixin:
   @property
   def _flow_processing_request_receiver(
       self,
-  ) -> Optional[spanner_lib.QueueReceiver]:
+  ) -> Optional[spanner_utils.RequestQueue]:
     return getattr(self, "__flow_processing_request_receiver", None)
 
   @_flow_processing_request_receiver.setter
   def _flow_processing_request_receiver(
-      self, value: Optional[spanner_lib.QueueReceiver]
+      self, value: Optional[spanner_utils.RequestQueue]
   ) -> None:
     setattr(self, "__flow_processing_request_receiver", value)
 
   @property
-  def _message_handler_receiver(self) -> Optional[spanner_lib.QueueReceiver]:
+  def _message_handler_receiver(self) -> Optional[spanner_utils.RequestQueue]:
     return getattr(self, "__message_handler_receiver", None)
 
   @_message_handler_receiver.setter
   def _message_handler_receiver(
-      self, value: Optional[spanner_lib.QueueReceiver]
+      self, value: Optional[spanner_utils.RequestQueue]
   ) -> None:
     setattr(self, "__message_handler_receiver", value)
 
@@ -952,7 +952,7 @@ class FlowsMixin:
               flows_pb2.FlowIterator,
           ],
       ],
-      txn: spanner_utils.Transaction,
+      txn,
   ) -> tuple[dict[_RequestKey, int], dict[_RequestKey, str], set[_RequestKey]]:
     """For given responses returns data about corresponding requests.
 
@@ -1040,7 +1040,7 @@ class FlowsMixin:
               flows_pb2.FlowIterator,
           ],
       ],
-      txn: spanner_utils.Transaction,
+      txn,
   ) -> None:
     """Builds the writes to store given responses in the db.
 
@@ -1079,7 +1079,7 @@ class FlowsMixin:
         mut.InsertOrUpdate("FlowResponses", row)
 
   def _BuildExpectedUpdates(
-      self, updates: dict[_RequestKey, int], txn: spanner_utils.Transaction
+      self, updates: dict[_RequestKey, int], txn
   ) -> None:
     """Builds updates for requests with known number of expected responses.
 
@@ -1218,7 +1218,7 @@ class FlowsMixin:
   def _GetFlowResponsesPerRequestCounts(
       self,
       request_keys: Iterable[_RequestKey],
-      txn: spanner_utils.SnapshotTransaction,
+      txn,
   ) -> dict[_RequestKey, int]:
     """Gets counts of already received responses for given requests.
 
@@ -1274,7 +1274,7 @@ class FlowsMixin:
       self,
       requests: set[_RequestKey],
       callback_states: dict[_RequestKey, str],
-      txn: spanner_utils.Transaction,
+      txn,
   ) -> tuple[
       set[_RequestKey], set[tuple[_FlowKey, Optional[rdfvalue.RDFDatetime]]]
   ]:
@@ -1363,7 +1363,7 @@ class FlowsMixin:
     return requests_to_mark, requests_to_notify
 
   def _BuildNeedsProcessingUpdates(
-      self, requests: set[_RequestKey], txn: spanner_utils.Transaction
+      self, requests: set[_RequestKey], txn
   ) -> None:
     """Builds updates for requests that have their NeedsProcessing flag set.
 
@@ -1386,7 +1386,7 @@ class FlowsMixin:
       self,
       requests_ready_for_processing: set[_RequestKey],
       callback_state_by_request: dict[_RequestKey, str],
-      txn: spanner_utils.Transaction,
+      txn,
   ) -> None:
     """Updates requests needs-processing flags, writes processing requests.
 
@@ -2198,7 +2198,7 @@ class FlowsMixin:
 
   def _BuildDeleteMessageHandlerRequestWrites(
       self,
-      txn: spanner_utils.Transaction,
+      txn,
       requests: Iterable[objects_pb2.MessageHandlerRequest],
   ) -> None:
     """Deletes given requests within a given transaction."""
@@ -2324,7 +2324,7 @@ class FlowsMixin:
       self._message_handler_receiver = None
 
   def _ReadHuntState(
-      self, txn: spanner_utils.Transaction, hunt_id: str
+      self, txn, hunt_id: str
   ) -> Optional[int]:
     try:
       row = txn.Read(table="Hunts", key=(IntHuntID(hunt_id),), cols=("State",))

@@ -1,4 +1,4 @@
-# Imports the Google Cloud Client Library.
+
 from google.cloud.spanner import Client
 
 from grr_response_core.lib import rdfvalue
@@ -26,7 +26,6 @@ class SpannerDB(
     spanner_blob_keys.BlobKeysMixin,
     spanner_blob_references.BlobReferencesMixin,
     spanner_clients.ClientsMixin,
-    spanner_signed_commands.SignedCommandsMixin,
     spanner_cron_jobs.CronJobsMixin,
     spanner_events.EventsMixin,
     spanner_flows.FlowsMixin,
@@ -34,6 +33,7 @@ class SpannerDB(
     spanner_hunts.HuntsMixin,
     spanner_paths.PathsMixin,
     spanner_signed_binaries.SignedBinariesMixin,
+    spanner_signed_commands.SignedCommandsMixin,
     spanner_users.UsersMixin,
     spanner_yara.YaraMixin,
     db_module.Database,
@@ -52,11 +52,18 @@ class SpannerDB(
     Returns:
       A GRR database instance.
     """
-    spanner_client = Client(onfig.CONFIG["ProjectID"])
+    project_id = config.CONFIG["ProjectID"]
+    spanner_client = Client(project_id)
     spanner_instance = spanner_client.instance(config.CONFIG["Spanner.instance"])
     spanner_database = spanner_instance.database(config.CONFIG["Spanner.database"])
+    msg_handler_top_id = config.CONFIG["MessageHandler.topic_id"]
+    msg_handler_sub_id = config.CONFIG["MessageHandler.subscription_id"]
+    flow_processing_top_id = config.CONFIG["FlowProcessing.topic_id"]
+    flow_processing_sub_id = config.CONFIG["FlowProcessing.subscription_id"]
 
-    return cls(spanner_utils.Database(spanner_database))
+    return cls(spanner_utils.Database(spanner_database, project_id,
+                                      msg_handler_top_id, msg_handler_sub_id,
+                                      flow_processing_top_id, flow_processing_sub_id))
 
   def Now(self) -> rdfvalue.RDFDatetime:
     """Retrieves current time as reported by the database."""
