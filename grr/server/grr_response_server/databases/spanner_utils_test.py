@@ -324,6 +324,7 @@ class DatabaseTest(spanner_test_lib.TestCase):
 
     requestQueue = self.raw_db.NewRequestQueue(
         "",
+        True,
         callback_func,
         receiver_max_keepalive_seconds=10,
         receiver_max_active_callbacks=1,
@@ -338,8 +339,42 @@ class DatabaseTest(spanner_test_lib.TestCase):
       if time.time() - start_time > 10:
         self.fail("Request was not processed in time.")
 
-    callback_func.assert_called_once_with("foo")
-    requestQueue.Stop()
+    callback_func.assert_called_once()
+    result = callback_func.call_args.kwargs
+    ack_ids = []
+    ack_ids.append(result["ack_id"])
+    requestQueue.ack(ack_ids)
+    requestQueue.stop()
+
+  def testNewRequestQueueCount(self):
+    callback_func = mock.Mock()
+
+    requestQueue = self.raw_db.NewRequestQueue(
+        "",
+        False,
+        callback_func,
+        receiver_max_keepalive_seconds=1,
+        receiver_max_active_callbacks=1,
+        receiver_max_messages_per_callback=1,
+    )
+
+    start_time = time.time()
+    requestQueue.publish("foo")
+    requestQueue.publish("bar")
+
+    results = {}
+
+    while len(results) < 2 and time.time() - start_time < 10:
+      time.sleep(0.1)
+      messages = requestQueue.pull()
+      ack_ids = []
+      for msg in messages:
+          results.update({msg.message.message_id: msg})
+          ack_ids.append(msg.ack_id)
+      requestQueue.ack(ack_ids)
+
+    self.assertLen(results, 2)
+    requestQueue.stop()
 
 if __name__ == "__main__":
   absltest.main()

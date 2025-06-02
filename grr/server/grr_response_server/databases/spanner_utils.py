@@ -41,7 +41,6 @@ Cursor = Iterator[Row]
 
 _T = TypeVar("_T")
 
-
 class RequestQueue:
   """
   This stores the callback internally, and will continue to deliver messages to
@@ -54,6 +53,7 @@ class RequestQueue:
       project_id: str,
       topic_id: str,
       subscription_id: str,
+      do_subscribe: bool,
       callback,  # : Callable
       receiver_max_keepalive_seconds: int,
       receiver_max_active_callbacks: int,
@@ -62,42 +62,44 @@ class RequestQueue:
     self.project_id = project_id
     self.topic_id = topic_id
     self.subscriber = pubsub_v1.SubscriberClient()
-    subscription_path = self.subscriber.subscription_path(project_id, subscription_id)
+    self.subscription_path = self.subscriber.subscription_path(project_id, subscription_id)
+    self.do_subscribe = do_subscribe
 
-    def queueCallback(message: pubsub_v1.subscriber.message.Message) -> None:
-      callback(message.data)
+    if do_subscribe:
+      # An optional executor to use. If not specified, a default one with maximum 10
+      # threads will be created.
+      executor = futures.ThreadPoolExecutor(max_workers=receiver_max_active_callbacks)
+      # A thread pool-based scheduler. It must not be shared across SubscriberClients.
+      scheduler = pubsub_v1.subscriber.scheduler.ThreadScheduler(executor)
 
-    # An optional executor to use. If not specified, a default one with maximum 10
-    # threads will be created.
-    executor = futures.ThreadPoolExecutor(max_workers=receiver_max_messages_per_callback)
-    # A thread pool-based scheduler. It must not be shared across SubscriberClients.
-    scheduler = pubsub_v1.subscriber.scheduler.ThreadScheduler(executor)
+      flow_control = pubsub_v1.types.FlowControl(max_messages=receiver_max_messages_per_callback)
 
-    flow_control = pubsub_v1.types.FlowControl(max_messages=receiver_max_messages_per_callback)
-
-    self.streaming_pull_future = self.subscriber.subscribe(
-      subscription_path, callback=queueCallback, scheduler=scheduler, flow_control=flow_control
-    )
+      self.streaming_pull_future = self.subscriber.subscribe(
+        self.subscription_path, callback=callback, scheduler=scheduler, flow_control=flow_control
+      )
 
   def publish(self, data: str) -> None:
     publisher = pubsub_v1.PublisherClient()
     topic_path = publisher.topic_path(self.project_id, self.topic_id)
     publisher.publish(topic_path, data.encode("utf-8"))
 
-  def pull(self):
-    # Create a client
-    client = pubsub_v1.SubscriberClient()
-    # Initialize request argument(s)
-    request = pubsub_v1.PullRequest(
-      subscription=subscription_path,
-      return_immediately=True,
-      max_messages=10000,
+  def ack(self, ack_ids: [str]) -> None:
+    self.subscriber.acknowledge(
+      request={"subscription": self.subscription_path, "ack_ids": ack_ids}
     )
-    # Make the request
-    response = client.pull(request=request)
 
-  def Stop(self):
-    if self.streaming_pull_future:
+  def pull(self):
+    # Make the request
+    response = self.subscriber.pull(
+        request={
+          "subscription": self.subscription_path,
+          "max_messages": 10000,
+        },
+    )
+    return response.received_messages
+
+  def stop(self):
+    if self.do_subscribe and self.streaming_pull_future:
       try:
         self.streaming_pull_future.cancel()
       except asyncio.CancelledError:
@@ -109,7 +111,6 @@ class RequestQueue:
       self.subscriber.close()
       # Add a small sleep to allow threads to fully terminate
       time.sleep(0.1) # Give a short buffer for threads to clean up
-
 
 class Database:
   """A wrapper around the PySpanner class.
@@ -556,6 +557,7 @@ class Database:
   def NewRequestQueue(
       self,
       queue: str,
+      do_subscribe: bool,
       callback: Callable[[Sequence[Any], bytes], None],
       receiver_max_keepalive_seconds: Optional[int] = None,
       receiver_max_active_callbacks: Optional[int] = None,
@@ -579,15 +581,13 @@ class Database:
       New queue receiver objects.
     """
 
-    def _Callback(data: str):
-      data = data.decode("utf-8")
-      if queue == "":
-        payload = data
-      elif queue == "MessageHandler":
-        payload = objects_pb2.MessageHandlerRequest.ParseFromString(data)
-      elif queue == "FlowProcessing":
-        payload = flows_pb2.FlowProcessingRequest.ParseFromString(data)
-      callback(payload)
+    def _Callback(message: pubsub_v1.subscriber.message.Message):
+      payload = message.data.decode("utf-8")
+      #if queue == "MessageHandler":
+      #  payload = objects_pb2.MessageHandlerRequest.ParseFromString(data)
+      #elif queue == "FlowProcessing":
+      #  payload = flows_pb2.FlowProcessingRequest.ParseFromString(data)
+      callback(payload=payload, ack_id=message.ack_id, publish_time=message.publish_time)
 
     if queue == "MessageHandler" or queue == "":
       topic_id = self.msg_handler_top_id
@@ -600,6 +600,7 @@ class Database:
         self.project_id,
         topic_id,
         subscription_id,
+        do_subscribe,
         _Callback,
         receiver_max_keepalive_seconds=receiver_max_keepalive_seconds,
         receiver_max_active_callbacks=receiver_max_active_callbacks,
