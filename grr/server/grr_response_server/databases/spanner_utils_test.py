@@ -323,8 +323,7 @@ class DatabaseTest(spanner_test_lib.TestCase):
     callback_func = mock.Mock()
 
     requestQueue = self.raw_db.NewRequestQueue(
-        "",
-        True,
+        "MessageHandler",
         callback_func,
         receiver_max_keepalive_seconds=10,
         receiver_max_active_callbacks=1,
@@ -332,7 +331,9 @@ class DatabaseTest(spanner_test_lib.TestCase):
     )
 
     start_time = time.time()
-    requestQueue.publish("foo")
+    requests = []
+    requests.append("foo")
+    self.raw_db.PublishMessageHandlerRequests(requests)
 
     while callback_func.call_count == 0:
       time.sleep(0.1)
@@ -343,38 +344,28 @@ class DatabaseTest(spanner_test_lib.TestCase):
     result = callback_func.call_args.kwargs
     ack_ids = []
     ack_ids.append(result["ack_id"])
-    requestQueue.ack(ack_ids)
-    requestQueue.stop()
+    self.raw_db.AckMessageHandlerRequests(ack_ids)
+    requestQueue.Stop()
 
-  def testNewRequestQueueCount(self):
-    callback_func = mock.Mock()
-
-    requestQueue = self.raw_db.NewRequestQueue(
-        "",
-        False,
-        callback_func,
-        receiver_max_keepalive_seconds=1,
-        receiver_max_active_callbacks=1,
-        receiver_max_messages_per_callback=1,
-    )
+  def testNewRequestCount(self):
 
     start_time = time.time()
-    requestQueue.publish("foo")
-    requestQueue.publish("bar")
+    requests = []
+    requests.append("foo")
+    requests.append("bar")
+    self.raw_db.PublishMessageHandlerRequests(requests)
 
     results = {}
-
-    while len(results) < 2 and time.time() - start_time < 10:
+    ack_ids = []
+    while len(results) < 2 or time.time() - start_time < 10:
       time.sleep(0.1)
-      messages = requestQueue.pull()
-      ack_ids = []
+      messages = self.raw_db.ReadMessageHandlerRequests()
       for msg in messages:
           results.update({msg.message.message_id: msg})
           ack_ids.append(msg.ack_id)
-      requestQueue.ack(ack_ids)
 
+    self.raw_db.AckMessageHandlerRequests(ack_ids)
     self.assertLen(results, 2)
-    requestQueue.stop()
 
 if __name__ == "__main__":
   absltest.main()
