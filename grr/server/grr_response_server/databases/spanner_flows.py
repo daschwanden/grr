@@ -2224,7 +2224,7 @@ class FlowsMixin:
       self,
       req: objects_pb2.MessageHandlerRequest,
       lease_time: rdfvalue.Duration,
-  ) -> None:
+  ) -> bool:
     """Leases the given message handler request.
 
     Leasing of the message amounts to the following:
@@ -2240,15 +2240,31 @@ class FlowsMixin:
       Copy of the original request object with "leased_until" and "leased_by"
       attributes set.
     """
-    delivery_time = rdfvalue.RDFDatetime.Now() + lease_time
+    date_time_now = rdfvalue.RDFDatetime.Now()
+    epoch_now = date_time_now.AsMicrosecondsSinceEpoch()
+    delivery_time = date_time_now + lease_time
 
-    leased_until = str(delivery_time.AsMicrosecondsSinceEpoch())
-    leased_by = utils.ProcessIdString()
+    leased = False
+    if not req.leased_by or req.leased_until <= epoch_now:
+      # If the message has not been leased yet or the lease has expired
+      # then take and write back the clone back to the queue
+      # and delete the original message 
+      clone = objects_pb2.MessageHandlerRequest()
+      clone.CopyFrom(req)
+      clone.leased_until = delivery_time.AsMicrosecondsSinceEpoch()
+      clone.leased_by = utils.ProcessIdString()
+      clone.ack_id = ""
+      self.WriteMessageHandlerRequests([clone])
+      self.DeleteMessageHandlerRequests([req])
+    elif req.leased_until > epoch_now:
+      # if we have leased the message (leased_until set and in the future)
+      # then we modify ack deadline to match the leased_until time
+      leased = True
+      ack_ids = []
+      ack_ids.append(req.ack_id)
+      self.db.LeaseMessageHandlerRequests(ack_ids, int((req.leased_until - epoch_now)/1000000))
 
-    ack_ids = []
-    ack_ids.append(req.ack_id)
-
-    self.db.LeaseMessageHandlerRequest(ack_ids, lease_time.ToInt(_SECONDS))
+    return leased
 
   def RegisterMessageHandler(
       self,
@@ -2259,19 +2275,15 @@ class FlowsMixin:
     """Registers a message handler to receive batches of messages."""
     self.UnregisterMessageHandler()
 
-    def Callback(payload: bytes, msg_id: str, ack_id: str, publish_time, attributes):
+    def Callback(payload: bytes, msg_id: str, ack_id: str, publish_time):
       try:
         req = objects_pb2.MessageHandlerRequest()
         req.ParseFromString(payload)
         req.ack_id = ack_id
-        for attr in attributes:
-          if attr[0] == "leased_until":
-            req.leased_until = int(attr[1])
-          elif attr[0] == "leased_by":
-            req.leased_by = attr[1]
-        self._LeaseMessageHandlerRequest(req, lease_time)
-        logging.info("Leased message handler request: %s", req.request_id)
-        handler([req])
+        leased = self._LeaseMessageHandlerRequest(req, lease_time)
+        if leased:
+          logging.info("Leased message handler request: %s", req.request_id)
+          handler([req])
       except Exception as e:  # pylint: disable=broad-except
         logging.exception(
             "Exception raised during MessageHandlerRequest processing: %s", e

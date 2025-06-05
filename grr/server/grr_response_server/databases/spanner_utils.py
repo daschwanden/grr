@@ -64,10 +64,11 @@ class RequestQueue:
     # A thread pool-based scheduler. It must not be shared across SubscriberClients.
     scheduler = pubsub_v1.subscriber.scheduler.ThreadScheduler(executor)
 
-    flow_control = pubsub_v1.types.FlowControl(max_messages=receiver_max_messages_per_callback)
+    #flow_control = pubsub_v1.types.FlowControl(max_messages=receiver_max_messages_per_callback)
 
     self.streaming_pull_future = subscriber.subscribe(
-      subscription_path, callback=callback, scheduler=scheduler, flow_control=flow_control
+      subscription_path, callback=callback, scheduler=scheduler
+      #subscription_path, callback=callback, scheduler=scheduler, flow_control=flow_control
     )
 
   def Stop(self):
@@ -543,7 +544,7 @@ class Database:
   def AckFlowProcessingRequests(self, ack_ids: [str]) -> None:
     self.AckRequests(ack_ids, self.flow_proccessing_sub_path)
 
-  def LeaseMessageHandlerRequest(self, ack_ids: [str], ack_deadline: int) -> None:
+  def LeaseMessageHandlerRequests(self, ack_ids: [str], ack_deadline: int) -> None:
     self.subscriber.modify_ack_deadline(
       request={
         "subscription": self.message_handler_sub_path,
