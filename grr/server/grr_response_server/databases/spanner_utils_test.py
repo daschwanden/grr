@@ -332,7 +332,7 @@ class DatabaseTest(spanner_test_lib.TestCase):
 
     start_time = time.time()
     requests = []
-    requests.append("foo")
+    requests.append("foo".encode("utf-8"))
     self.raw_db.PublishMessageHandlerRequests(requests)
 
     while callback_func.call_count == 0:
@@ -351,18 +351,15 @@ class DatabaseTest(spanner_test_lib.TestCase):
 
     start_time = time.time()
     requests = []
-    requests.append("foo")
-    requests.append("bar")
+    requests.append("foo".encode("utf-8"))
+    requests.append("bar".encode("utf-8"))
     self.raw_db.PublishMessageHandlerRequests(requests)
 
-    results = {}
+    results = self.raw_db.ReadMessageHandlerRequests()
     ack_ids = []
-    while len(results) < 2 or time.time() - start_time < 10:
-      time.sleep(0.1)
-      messages = self.raw_db.ReadMessageHandlerRequests()
-      for msg in messages:
-          results.update({msg.message.message_id: msg})
-          ack_ids.append(msg.ack_id)
+    
+    for result in results:
+      ack_ids.append(result["ack_id"])
 
     self.raw_db.AckMessageHandlerRequests(ack_ids)
     self.assertLen(results, 2)

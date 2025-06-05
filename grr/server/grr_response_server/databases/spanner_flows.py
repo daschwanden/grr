@@ -28,10 +28,11 @@ SPANNER_DELETE_FLOW_REQUESTS_FAILURES = metrics.Counter(
     name="spanner_delete_flow_requests_failures"
 )
 
-
 _MESSAGE_HANDLER_MAX_KEEPALIVE_SECONDS = 300
 _MESSAGE_HANDLER_MAX_ACTIVE_CALLBACKS = 20
 
+_MILLISECONDS = 1000
+_SECONDS = 1000 * _MILLISECONDS
 
 @dataclasses.dataclass(frozen=True)
 class _FlowKey:
@@ -2157,41 +2158,29 @@ class FlowsMixin:
   def WriteMessageHandlerRequests(
       self, requests: Iterable[objects_pb2.MessageHandlerRequest]
   ) -> None:
-    """Writes a list of message handler requests to the database."""
+    """Writes a list of message handler requests to the queue."""
 
-    def Mutation(mut: spanner_utils.Mutation) -> None:
-      creation_timestamp = spanner_lib.CommitTimestamp()
+    msgRequests = []
+    for request in requests:
+      msgRequests.append(request.SerializeToString())
 
-      for r in requests:
-        key = (r.handler_name, r.request_id, creation_timestamp)
-
-        mut.Send(
-            queue="MessageHandlerRequestsQueue",
-            key=key,
-            value=r,
-            column="Payload",
-        )
-
-    self.db.BufferedMutate(Mutation)
+    self.db.PublishMessageHandlerRequests(msgRequests)
 
   @db_utils.CallLogged
   @db_utils.CallAccounted
   def ReadMessageHandlerRequests(
       self,
   ) -> Sequence[objects_pb2.MessageHandlerRequest]:
-    """Reads all message handler requests from the database."""
-
-    query = """
-    SELECT t.Payload, t.CreationTime FROM MessageHandlerRequestsQueue AS t
-    """
+    """Reads all message handler requests from the queue."""
 
     results = []
-    for payload, creation_time in self.db.ParamQuery(query, {}):
+    for result in self.db.ReadMessageHandlerRequests():
       req = objects_pb2.MessageHandlerRequest()
-      req.ParseFromString(payload)
+      req.ParseFromString(result["payload"])
       req.timestamp = rdfvalue.RDFDatetime.FromDatetime(
-          creation_time
+          result["publish_time"]
       ).AsMicrosecondsSinceEpoch()
+      req.ack_id = result["ack_id"]
       results.append(req)
 
     return results
@@ -2225,16 +2214,17 @@ class FlowsMixin:
   ) -> None:
     """Deletes a list of message handler requests from the database."""
 
-    def Txn(txn: spanner_utils.Transaction) -> None:
-      self._BuildDeleteMessageHandlerRequestWrites(txn, requests)
+    ack_ids = []
+    for request in requests:
+      ack_ids.append(request.ack_id)
 
-    self.db.Transact(Txn)
+    self.db.AckMessageHandlerRequests(ack_ids)
 
   def _LeaseMessageHandlerRequest(
       self,
       req: objects_pb2.MessageHandlerRequest,
       lease_time: rdfvalue.Duration,
-  ) -> objects_pb2.MessageHandlerRequest:
+  ) -> None:
     """Leases the given message handler request.
 
     Leasing of the message amounts to the following:
@@ -2252,35 +2242,13 @@ class FlowsMixin:
     """
     delivery_time = rdfvalue.RDFDatetime.Now() + lease_time
 
-    clone = objects_pb2.MessageHandlerRequest()
-    clone.CopyFrom(req)
-    clone.leased_until = delivery_time.AsMicrosecondsSinceEpoch()
-    clone.leased_by = utils.ProcessIdString()
+    leased_until = str(delivery_time.AsMicrosecondsSinceEpoch())
+    leased_by = utils.ProcessIdString()
 
-    def Txn(txn) -> None:
-      self._BuildDeleteMessageHandlerRequestWrites(txn, [clone])
+    ack_ids = []
+    ack_ids.append(req.ack_id)
 
-      with txn.BufferedMutate() as mut:
-        key = (req.handler_name, req.request_id, spanner_lib.CommitTimestamp())
-        mut.Send(
-            queue="MessageHandlerRequestsQueue",
-            key=key,
-            value=clone,
-            column="Payload",
-            deliver_time=delivery_time.AsDatetimeUTC(),
-        )
-
-    result = self.db.Transact(Txn)
-    # Using the transaction's commit timestamp and modifying the request object
-    # with it allows us to avoid doing a separate database read to read
-    # the same object back with a Spanner-provided timestamp
-    # (please see ReadMessageHandlerRequests that uses the CreationTime
-    # column to set the request's 'timestamp' attribute).
-    clone.timestamp = rdfvalue.RDFDatetime.FromDatetime(
-        result.commit_time
-    ).AsMicrosecondsSinceEpoch()
-
-    return clone
+    self.db.LeaseMessageHandlerRequest(ack_ids, lease_time.ToInt(_SECONDS))
 
   def RegisterMessageHandler(
       self,
@@ -2291,27 +2259,31 @@ class FlowsMixin:
     """Registers a message handler to receive batches of messages."""
     self.UnregisterMessageHandler()
 
-    def Callback(expanded_key: Sequence[Any], payload: bytes):
-      del expanded_key
+    def Callback(payload: bytes, msg_id: str, ack_id: str, publish_time, attributes):
       try:
         req = objects_pb2.MessageHandlerRequest()
         req.ParseFromString(payload)
-        leased = self._LeaseMessageHandlerRequest(req, lease_time)
+        req.ack_id = ack_id
+        for attr in attributes:
+          if attr[0] == "leased_until":
+            req.leased_until = int(attr[1])
+          elif attr[0] == "leased_by":
+            req.leased_by = attr[1]
+        self._LeaseMessageHandlerRequest(req, lease_time)
         logging.info("Leased message handler request: %s", req.request_id)
-        handler([leased])
+        handler([req])
       except Exception as e:  # pylint: disable=broad-except
         logging.exception(
             "Exception raised during MessageHandlerRequest processing: %s", e
         )
 
-    receiver = self.db.NewQueueReceiver(
-        "MessageHandlerRequestsQueue",
+    receiver = self.db.NewRequestQueue(
+        "MessageHandler",
         Callback,
         receiver_max_keepalive_seconds=_MESSAGE_HANDLER_MAX_KEEPALIVE_SECONDS,
         receiver_max_active_callbacks=_MESSAGE_HANDLER_MAX_ACTIVE_CALLBACKS,
         receiver_max_messages_per_callback=limit,
     )
-    receiver.Receive()
     self._message_handler_receiver = receiver
 
   def UnregisterMessageHandler(

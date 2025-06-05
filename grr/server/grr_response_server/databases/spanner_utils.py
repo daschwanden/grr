@@ -543,9 +543,18 @@ class Database:
   def AckFlowProcessingRequests(self, ack_ids: [str]) -> None:
     self.AckRequests(ack_ids, self.flow_proccessing_sub_path)
 
+  def LeaseMessageHandlerRequest(self, ack_ids: [str], ack_deadline: int) -> None:
+    self.subscriber.modify_ack_deadline(
+      request={
+        "subscription": self.message_handler_sub_path,
+        "ack_ids": ack_ids,
+        "ack_deadline_seconds": ack_deadline,
+      }
+    )
+
   def PublishRequests(self, requests: [str], top_path: str) -> None:
     for req in requests:
-      self.publisher.publish(top_path, req.encode("utf-8"))
+      self.publisher.publish(top_path, req)
 
   def AckRequests(self, ack_ids: [str], sub_path: str) -> None:
     self.subscriber.acknowledge(
@@ -554,13 +563,27 @@ class Database:
 
   def ReadRequests(self, sub_path: str):
     # Make the request
-    response = self.subscriber.pull(
+
+    start_time = time.time()
+    results = {}
+    while time.time() - start_time < 10:
+      time.sleep(0.1)
+
+      response = self.subscriber.pull(
         request={
           "subscription": sub_path,
           "max_messages": 10000,
         },
-    )
-    return response.received_messages
+      )
+      for resp in response.received_messages:
+        results.update({resp.message.message_id: {
+                          "payload": resp.message.data,
+                          "msg_id": resp.message.message_id,
+                          "ack_id": resp.ack_id,
+                          "publish_time": resp.message.publish_time}
+                        })
+
+    return results.values()
 
   def NewRequestQueue(
       self,
@@ -589,12 +612,9 @@ class Database:
     """
 
     def _Callback(message: pubsub_v1.subscriber.message.Message):
-      payload = message.data.decode("utf-8")
-      #if queue == "MessageHandler":
-      #  payload = objects_pb2.MessageHandlerRequest.ParseFromString(data)
-      #elif queue == "FlowProcessing":
-      #  payload = flows_pb2.FlowProcessingRequest.ParseFromString(data)
-      callback(payload=payload, ack_id=message.ack_id, publish_time=message.publish_time)
+      payload = message.data
+      callback(payload=payload, msg_id=message.message_id, ack_id=message.ack_id,
+               publish_time=message.publish_time)
 
     if queue == "MessageHandler" or queue == "":
       subscription_path = self.message_handler_sub_path

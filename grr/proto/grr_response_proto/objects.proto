@@ -331,6 +331,7 @@ message MessageHandlerRequest {
   optional uint64 leased_until = 5 [(sem_type) = { type: "RDFDatetime" }];
   optional string leased_by = 6;
   optional EmbeddedRDFValue request = 7;
+  optional string ack_id = 8;
 }
 
 message SerializedValueOfUnrecognizedType {
