@@ -167,7 +167,7 @@ CREATE TABLE Labels (
 ) PRIMARY KEY (Label);
 
 CREATE TABLE Clients (
-  ClientId INT64 NOT NULL,
+  ClientId STRING(18) NOT NULL,
   LastSnapshotTime TIMESTAMP OPTIONS (allow_commit_timestamp = true),
   LastStartupTime TIMESTAMP OPTIONS (allow_commit_timestamp = true),
   LastRRGStartupTime TIMESTAMP OPTIONS (allow_commit_timestamp = true),
@@ -181,28 +181,28 @@ CREATE TABLE Clients (
 ) PRIMARY KEY (ClientId);
 
 CREATE TABLE ClientSnapshots(
-  ClientId INT64 NOT NULL,
+  ClientId STRING(18) NOT NULL,
   CreationTime TIMESTAMP NOT NULL OPTIONS (allow_commit_timestamp = true),
   Snapshot `grr.ClientSnapshot` NOT NULL,
 ) PRIMARY KEY (ClientId, CreationTime),
   INTERLEAVE IN PARENT Clients ON DELETE CASCADE;
 
 CREATE TABLE ClientStartups(
-  ClientId INT64 NOT NULL,
+  ClientId STRING(18) NOT NULL,
   CreationTime TIMESTAMP NOT NULL OPTIONS (allow_commit_timestamp = true),
   Startup `grr.StartupInfo` NOT NULL,
 ) PRIMARY KEY (ClientId, CreationTime),
   INTERLEAVE IN PARENT Clients ON DELETE CASCADE;
 
 CREATE TABLE ClientRRGStartups(
-  ClientId INT64 NOT NULL,
+  ClientId STRING(18) NOT NULL,
   CreationTime TIMESTAMP NOT NULL OPTIONS (allow_commit_timestamp = true),
   Startup `rrg.startup.Startup` NOT NULL,
 ) PRIMARY KEY (ClientId, CreationTime),
   INTERLEAVE IN PARENT Clients ON DELETE CASCADE;
 
 CREATE TABLE ClientCrashes(
-  ClientId INT64 NOT NULL,
+  ClientId STRING(18) NOT NULL,
   CreationTime TIMESTAMP NOT NULL OPTIONS (allow_commit_timestamp = true),
   Crash `grr.ClientCrash` NOT NULL,
 ) PRIMARY KEY (ClientId, CreationTime),
@@ -219,7 +219,7 @@ CREATE TABLE Users (
 
 CREATE TABLE UserNotifications(
   Username STRING(256) NOT NULL,
-  NotificationId INT64 NOT NULL,
+  NotificationId STRING(36) NOT NULL,
   Type `grr.UserNotification.Type` NOT NULL,
   State `grr.UserNotification.State` NOT NULL,
   CreationTime TIMESTAMP NOT NULL OPTIONS (allow_commit_timestamp = true),
@@ -230,9 +230,9 @@ CREATE TABLE UserNotifications(
 
 CREATE TABLE ApprovalRequests(
   Requestor STRING(256) NOT NULL,
-  ApprovalId INT64 NOT NULL,
-  SubjectClientId INT64,
-  SubjectHuntId INT64,
+  ApprovalId STRING(36) NOT NULL,
+  SubjectClientId STRING(18),
+  SubjectHuntId STRING(8),
   SubjectCronJobId STRING(100),
   Reason STRING(MAX) NOT NULL,
   CreationTime TIMESTAMP NOT NULL OPTIONS (allow_commit_timestamp = true),
@@ -268,9 +268,9 @@ CREATE INDEX ApprovalRequestsByRequestorSubjectCronJobId
 
 CREATE TABLE ApprovalGrants(
   Requestor STRING(256) NOT NULL,
-  ApprovalId INT64 NOT NULL,
+  ApprovalId STRING(36) NOT NULL,
   Grantor STRING(256) NOT NULL,
-  GrantId INT64 NOT NULL,
+  GrantId STRING(36) NOT NULL,
   CreationTime TIMESTAMP NOT NULL OPTIONS (allow_commit_timestamp = true),
 
   CONSTRAINT fk_approval_grant_grantor_username
@@ -283,7 +283,7 @@ CREATE INDEX ApprovalGrantsByGrantor
   ON ApprovalGrants(Grantor);
 
 CREATE TABLE ClientLabels(
-  ClientId INT64 NOT NULL,
+  ClientId STRING(18) NOT NULL,
   Owner STRING(256) NOT NULL,
   Label STRING(128) NOT NULL,
 
@@ -298,7 +298,7 @@ CREATE TABLE ClientLabels(
   INTERLEAVE IN PARENT Clients ON DELETE CASCADE;
 
 CREATE TABLE ClientKeywords(
-  ClientId INT64 NOT NULL,
+  ClientId STRING(18) NOT NULL,
   Keyword STRING(256) NOT NULL,
   CreationTime TIMESTAMP NOT NULL OPTIONS (allow_commit_timestamp = true),
 
@@ -311,10 +311,10 @@ CREATE INDEX ClientKeywordsByKeywordCreationTime
   ON ClientKeywords(Keyword, CreationTime);
 
 CREATE TABLE Flows(
-  ClientId INT64 NOT NULL,
-  FlowId INT64 NOT NULL,
-  ParentFlowId INT64,
-  ParentHuntId INT64,
+  ClientId STRING(18) NOT NULL,
+  FlowId STRING(8) NOT NULL,
+  ParentFlowId STRING(8),
+  ParentHuntId STRING(8),
   LongFlowId STRING(256) NOT NULL,
   Creator STRING(256) NOT NULL,
   Name STRING(256) NOT NULL,
@@ -322,7 +322,7 @@ CREATE TABLE Flows(
   CreationTime TIMESTAMP NOT NULL OPTIONS (allow_commit_timestamp = true),
   UpdateTime TIMESTAMP NOT NULL OPTIONS (allow_commit_timestamp = true),
   Crash `grr.ClientCrash`,
-  NextRequestToProcess INT64,
+  NextRequestToProcess STRING(8),
   ProcessingWorker STRING(MAX),
   ProcessingStartTime TIMESTAMP OPTIONS (allow_commit_timestamp = true),
   ProcessingEndTime TIMESTAMP,
@@ -347,9 +347,9 @@ CREATE INDEX FlowsByParentHuntIdFlowIdState
   STORING (ReplyCount, NetworkBytesSent, UserCpuTimeUsed, SystemCpuTimeUsed);
 
 CREATE TABLE FlowResults(
-  ClientId INT64 NOT NULL,
-  FlowId INT64 NOT NULL,
-  HuntId INT64,
+  ClientId STRING(18) NOT NULL,
+  FlowId STRING(8) NOT NULL,
+  HuntId STRING(8),
   CreationTime TIMESTAMP NOT NULL,
   Payload `google.protobuf.Any`,
   RdfType STRING(MAX),
@@ -365,9 +365,9 @@ CREATE INDEX FlowResultsByHuntIdFlowIdRdfTypeTagCreationTime
   ON FlowResults(HuntId, FlowId, RdfType, Tag, CreationTime);
 
 CREATE TABLE FlowErrors(
-  ClientId INT64 NOT NULL,
-  FlowId INT64 NOT NULL,
-  HuntId INT64 NOT NULL,
+  ClientId STRING(18) NOT NULL,
+  FlowId STRING(8) NOT NULL,
+  HuntId STRING(8) NOT NULL,
   CreationTime TIMESTAMP NOT NULL,
   Payload `google.protobuf.Any`,
   RdfType STRING(MAX),
@@ -381,12 +381,12 @@ CREATE INDEX FlowErrorsByHuntIdFlowIdRdfTypeTagCreationTime
   ON FlowErrors(HuntId, FlowId, RdfType, Tag, CreationTime);
 
 CREATE TABLE FlowRequests(
-  ClientId INT64 NOT NULL,
-  FlowId INT64 NOT NULL,
-  RequestId INT64 NOT NULL,
+  ClientId STRING(18) NOT NULL,
+  FlowId STRING(8) NOT NULL,
+  RequestId STRING(8) NOT NULL,
   NeedsProcessing BOOL,
   ExpectedResponseCount INT64,
-  NextResponseId INT64,
+  NextResponseId STRING(8),
   CallbackState STRING(256),
   Payload `grr.FlowRequest` NOT NULL,
   StartTime TIMESTAMP,
@@ -396,10 +396,10 @@ CREATE TABLE FlowRequests(
   ROW DELETION POLICY (OLDER_THAN(CreationTime, INTERVAL 84 DAY));
 
 CREATE TABLE FlowResponses(
-  ClientId INT64 NOT NULL,
-  FlowId INT64 NOT NULL,
-  RequestId INT64 NOT NULL,
-  ResponseId INT64 NOT NULL,
+  ClientId STRING(18) NOT NULL,
+  FlowId STRING(8) NOT NULL,
+  RequestId STRING(8) NOT NULL,
+  ResponseId STRING(8) NOT NULL,
   Response `grr.FlowResponse`,
   Status `grr.FlowStatus`,
   Iterator `grr.FlowIterator`,
@@ -413,9 +413,9 @@ CREATE TABLE FlowResponses(
   INTERLEAVE IN PARENT FlowRequests ON DELETE CASCADE;
 
 CREATE TABLE FlowLogEntries(
-  ClientId INT64 NOT NULL,
-  FlowId INT64 NOT NULL,
-  HuntId INT64,
+  ClientId STRING(18) NOT NULL,
+  FlowId STRING(8) NOT NULL,
+  HuntId STRING(8),
   CreationTime TIMESTAMP NOT NULL OPTIONS (allow_commit_timestamp = true),
   Message STRING(MAX) NOT NULL,
 ) PRIMARY KEY (ClientId, FlowId, CreationTime),
@@ -425,10 +425,10 @@ CREATE INDEX FlowLogEntriesByHuntIdCreationTime
   ON FlowLogEntries(HuntId, CreationTime);
 
 CREATE TABLE FlowRRGLogs(
-  ClientId INT64 NOT NULL,
-  FlowId INT64 NOT NULL,
-  RequestId INT64 NOT NULL,
-  ResponseId INT64 NOT NULL,
+  ClientId STRING(18) NOT NULL,
+  FlowId STRING(8) NOT NULL,
+  RequestId STRING(8) NOT NULL,
+  ResponseId STRING(8) NOT NULL,
   LogLevel `rrg.Log.Level` NOT NULL,
   LogTime TIMESTAMP NOT NULL,
   LogMessage STRING(MAX) NOT NULL,
@@ -437,10 +437,10 @@ CREATE TABLE FlowRRGLogs(
   INTERLEAVE IN PARENT Flows ON DELETE CASCADE;
 
 CREATE TABLE FlowOutputPluginLogEntries(
-  ClientId INT64 NOT NULL,
-  FlowId INT64 NOT NULL,
-  OutputPluginId INT64 NOT NULL,
-  HuntId INT64,
+  ClientId STRING(18) NOT NULL,
+  FlowId STRING(8) NOT NULL,
+  OutputPluginId STRING(8) NOT NULL,
+  HuntId STRING(8),
   CreationTime TIMESTAMP NOT NULL OPTIONS (allow_commit_timestamp = true),
   Type `grr.FlowOutputPluginLogEntry.LogEntryType` NOT NULL,
   Message STRING(MAX) NOT NULL,
@@ -451,9 +451,9 @@ CREATE INDEX FlowOutputPluginLogEntriesByHuntIdCreationTime
   ON FlowOutputPluginLogEntries(HuntId, CreationTime);
 
 CREATE TABLE ScheduledFlows(
-  ClientId INT64 NOT NULL,
+  ClientId STRING(18) NOT NULL,
   Creator STRING(256) NOT NULL,
-  ScheduledFlowId INT64 NOT NULL,
+  ScheduledFlowId STRING(8) NOT NULL,
   FlowName STRING(256) NOT NULL,
   FlowArgs `google.protobuf.Any` NOT NULL,
   RunnerArgs `grr.FlowRunnerArgs` NOT NULL,
@@ -470,7 +470,7 @@ CREATE INDEX ScheduledFlowsByCreator
   ON ScheduledFlows(Creator);
 
 CREATE TABLE Paths(
-  ClientId INT64 NOT NULL,
+  ClientId STRING(18) NOT NULL,
   Type `grr.PathInfo.PathType` NOT NULL,
   Path BYTES(MAX) NOT NULL,
   CreationTime TIMESTAMP NOT NULL OPTIONS (allow_commit_timestamp = true),
@@ -485,7 +485,7 @@ CREATE INDEX PathsByClientIdTypePathDepth
   ON Paths(ClientId, Type, Path, Depth);
 
 CREATE TABLE PathFileStats(
-  ClientId INT64 NOT NULL,
+  ClientId STRING(18) NOT NULL,
   Type `grr.PathInfo.PathType` NOT NULL,
   Path BYTES(MAX) NOT NULL,
   CreationTime TIMESTAMP NOT NULL OPTIONS (allow_commit_timestamp = true),
@@ -494,7 +494,7 @@ CREATE TABLE PathFileStats(
   INTERLEAVE IN PARENT Paths ON DELETE CASCADE;
 
 CREATE TABLE PathFileHashes(
-  ClientId INT64 NOT NULL,
+  ClientId STRING(18) NOT NULL,
   Type `grr.PathInfo.PathType` NOT NULL,
   Path BYTES(MAX) NOT NULL,
   CreationTime TIMESTAMP NOT NULL OPTIONS (allow_commit_timestamp = true),
@@ -542,7 +542,7 @@ CREATE TABLE YaraSignatureReferences(
 ) PRIMARY KEY (BlobId);
 
 CREATE TABLE Hunts(
-  HuntId INT64 NOT NULL,
+  HuntId STRING(8) NOT NULL,
   CreationTime TIMESTAMP NOT NULL OPTIONS (allow_commit_timestamp = true),
   LastUpdateTime TIMESTAMP NOT NULL OPTIONS (allow_commit_timestamp = true),
   Creator STRING(256) NOT NULL,
@@ -579,8 +579,8 @@ CREATE INDEX HuntsByCreationTime
 CREATE INDEX HuntsByCreator ON Hunts(Creator);
 
 CREATE TABLE HuntOutputPlugins(
-  HuntId INT64 NOT NULL,
-  OutputPluginId INT64 NOT NULL,
+  HuntId STRING(8) NOT NULL,
+  OutputPluginId STRING(8) NOT NULL,
   Name STRING(256) NOT NULL,
   Args `google.protobuf.Any`,
   State `google.protobuf.Any` NOT NULL,
@@ -588,7 +588,7 @@ CREATE TABLE HuntOutputPlugins(
   INTERLEAVE IN PARENT Hunts ON DELETE CASCADE;
 
 CREATE TABLE ForemanRules(
-  HuntId INT64 NOT NULL,
+  HuntId STRING(8) NOT NULL,
   ExpirationTime TIMESTAMP NOT NULL,
   Payload `grr.ForemanCondition`,
 

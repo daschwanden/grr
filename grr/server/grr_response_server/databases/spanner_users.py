@@ -3,8 +3,8 @@
 
 import datetime
 import logging
-import random
 import sys
+import uuid
 
 from typing import Optional, Sequence, Tuple
 
@@ -67,21 +67,21 @@ class UsersMixin:
 
     def Transaction(txn) -> None:
       try:
-        txn.read(table="Users", columns=("Username",), keyset=keyset)
+        txn.read(table="Users", columns=("Username",), keyset=keyset).one()
       except NotFound:
         raise abstract_db.UnknownGRRUserError(username)
 
       query = f"""
         DELETE
           FROM ApprovalGrants@{{FORCE_INDEX=ApprovalGrantsByGrantor}} AS g
-         WHERE g.Grantor = {username}
+         WHERE g.Grantor = '{username}'
       """
       txn.execute_sql(query)
 
       query = f"""
         DELETE
           FROM ScheduledFlows@{{FORCE_INDEX=ScheduledFlowsByCreator}} AS f
-         WHERE f.Creator = {username}
+         WHERE f.Creator = '{username}'
       """
       txn.execute_sql(query)
 
@@ -181,7 +181,7 @@ class UsersMixin:
   @db_utils.CallAccounted
   def WriteApprovalRequest(self, request: objects_pb2.ApprovalRequest) -> str:
     """Writes an approval request object."""
-    approval_id = random.randint(0, sys.maxsize)
+    approval_id = str(uuid.uuid4())
 
     row = {
         "Requestor": request.requestor_username,
@@ -198,9 +198,9 @@ class UsersMixin:
     }
 
     if request.approval_type == _APPROVAL_TYPE_CLIENT:
-      row["SubjectClientId"] = db_utils.ClientIDToInt(request.subject_id)
+      row["SubjectClientId"] = request.subject_id
     elif request.approval_type == _APPROVAL_TYPE_HUNT:
-      row["SubjectHuntId"] = db_utils.HuntIDToInt(request.subject_id)
+      row["SubjectHuntId"] = request.subject_id
     elif request.approval_type == _APPROVAL_TYPE_CRON_JOB:
       row["SubjectCronJobId"] = request.subject_id
     else:
@@ -210,7 +210,7 @@ class UsersMixin:
         table="ApprovalRequests", row=row, txn_tag="WriteApprovalRequest"
     )
 
-    return _HexApprovalID(approval_id)
+    return approval_id
 
   @db_utils.CallLogged
   @db_utils.CallAccounted
@@ -220,7 +220,6 @@ class UsersMixin:
       approval_id: str,
   ) -> objects_pb2.ApprovalRequest:
     """Reads an approval request object with a given id."""
-    approval_id = _UnhexApprovalID(approval_id)
 
     query = """
       SELECT r.SubjectClientId, r.SubjectHuntId, r.SubjectCronJobId,
@@ -256,7 +255,7 @@ class UsersMixin:
 
     request = objects_pb2.ApprovalRequest(
         requestor_username=username,
-        approval_id=_HexApprovalID(approval_id),
+        approval_id=approval_id,
         reason=reason,
         timestamp=RDFDatetime(creation_time).AsMicrosecondsSinceEpoch(),
         expiration_time=RDFDatetime(expiration_time).AsMicrosecondsSinceEpoch(),
@@ -265,10 +264,10 @@ class UsersMixin:
     )
 
     if subject_client_id is not None:
-      request.subject_id = db_utils.IntToClientID(subject_client_id)
+      request.subject_id = subject_client_id
       request.approval_type = _APPROVAL_TYPE_CLIENT
     elif subject_hunt_id is not None:
-      request.subject_id = db_utils.IntToHuntID(subject_hunt_id)
+      request.subject_id = subject_hunt_id
       request.approval_type = _APPROVAL_TYPE_HUNT
     elif subject_cron_job_id is not None:
       request.subject_id = subject_cron_job_id
@@ -327,13 +326,13 @@ class UsersMixin:
       query += " AND r.SubjectClientId IS NOT NULL"
       if subject_id is not None:
         query += " AND r.SubjectClientId = {{subject_client_id}}"
-        params["subject_client_id"] = db_utils.ClientIDToInt(subject_id)
+        params["subject_client_id"] = subject_id
         index = "ApprovalRequestsByRequestorSubjectClientId"
     elif typ == _APPROVAL_TYPE_HUNT:
       query += " AND r.SubjectHuntId IS NOT NULL"
       if subject_id is not None:
         query += " AND r.SubjectHuntId = {{subject_hunt_id}}"
-        params["subject_hunt_id"] = db_utils.HuntIDToInt(subject_id)
+        params["subject_hunt_id"] = subject_id
         index = "ApprovalRequestsByRequestorSubjectHuntId"
     elif typ == _APPROVAL_TYPE_CRON_JOB:
       query += " AND r.SubjectCronJobId IS NOT NULL"
@@ -360,7 +359,7 @@ class UsersMixin:
 
       request = objects_pb2.ApprovalRequest(
           requestor_username=username,
-          approval_id=_HexApprovalID(approval_id),
+          approval_id=approval_id,
           reason=reason,
           timestamp=RDFDatetime(creation_time).AsMicrosecondsSinceEpoch(),
           expiration_time=RDFDatetime(
@@ -371,10 +370,10 @@ class UsersMixin:
       )
 
       if subject_client_id is not None:
-        request.subject_id = db_utils.IntToClientID(subject_client_id)
+        request.subject_id = subject_client_id
         request.approval_type = _APPROVAL_TYPE_CLIENT
       elif subject_hunt_id is not None:
-        request.subject_id = db_utils.IntToHuntID(subject_hunt_id)
+        request.subject_id = subject_hunt_id
         request.approval_type = _APPROVAL_TYPE_HUNT
       elif subject_cron_job_id is not None:
         request.subject_id = subject_cron_job_id
@@ -406,10 +405,9 @@ class UsersMixin:
     """Grants approval for a given request using given username."""
     row = {
         "Requestor": requestor_username,
-        "ApprovalId": _UnhexApprovalID(approval_id),
+        "ApprovalId": approval_id,
         "Grantor": grantor_username,
-        # TODO: Look into Spanner sequences to generate unique IDs.
-        "GrantId": random.randint(0, sys.maxsize),
+        "GrantId": str(uuid.uuid4()),
         "CreationTime": spanner_lib.COMMIT_TIMESTAMP,
     }
 
@@ -424,8 +422,7 @@ class UsersMixin:
     """Writes a notification for a given user."""
     row = {
         "Username": notification.username,
-        # TODO: Look into Spanner sequences to generate unique IDs.
-        "NotificationId": random.randint(0, sys.maxsize),
+        "NotificationId": str(uuid.uuid4()),
         "Type": int(notification.notification_type),
         "State": int(notification.state),
         "CreationTime": spanner_lib.COMMIT_TIMESTAMP,
@@ -526,7 +523,7 @@ class UsersMixin:
     query = f"""
       UPDATE UserNotifications n
          SET n.State = {state}
-       WHERE n.Username = {username}
+       WHERE n.Username = '{username}'
          AND n.CreationTime IN ({param_placeholders})
     """
 

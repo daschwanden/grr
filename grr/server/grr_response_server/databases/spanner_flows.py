@@ -276,8 +276,8 @@ class FlowsMixin:
     row["State"] = int(flow_obj.flow_state)
     row["NextRequestToProcess"] = flow_obj.next_request_to_process
 
-    row["CreationTime"] = spanner_lib.CommitTimestamp()
-    row["UpdateTime"] = spanner_lib.CommitTimestamp()
+    row["CreationTime"] = spanner_lib.COMMIT_TIMESTAMP
+    row["UpdateTime"] = spanner_lib.COMMIT_TIMESTAMP
 
     if flow_obj.HasField("client_crash_info"):
       row["Crash"] = flow_obj.client_crash_info
@@ -299,8 +299,8 @@ class FlowsMixin:
 
     row["Flow"] = flow_obj
 
-    row["ReplyCount"] = spanner_lib.UInt64(flow_obj.num_replies_sent)
-    row["NetworkBytesSent"] = spanner_lib.UInt64(flow_obj.network_bytes_sent)
+    row["ReplyCount"] = int(flow_obj.num_replies_sent)
+    row["NetworkBytesSent"] = int(flow_obj.network_bytes_sent)
     row["UserCpuTimeUsed"] = float(flow_obj.cpu_time_used.user_cpu_time)
     row["SystemCpuTimeUsed"] = float(flow_obj.cpu_time_used.system_cpu_time)
 
@@ -311,9 +311,9 @@ class FlowsMixin:
         )
       else:
         self.db.Insert(table="Flows", row=row, txn_tag="WriteFlowObject_I")
-    except spanner_errors.AlreadyExistsError as error:
+    except AlreadyExists as error:
       raise db.FlowExistsError(client_id, flow_id) from error
-    except spanner_errors.RowNotFoundError as error:
+    except NotFound as error:
       if "Parent row is missing: Clients" in str(error):
         raise db.UnknownClientError(client_id)
       else:
@@ -453,14 +453,14 @@ class FlowsMixin:
     row = {
         "ClientId": spanner_clients.IntClientID(client_id),
         "FlowId": IntFlowID(flow_id),
-        "UpdateTime": spanner_lib.CommitTimestamp(),
+        "UpdateTime": spanner_lib.COMMIT_TIMESTAMP,
     }
 
     if isinstance(flow_obj, flows_pb2.Flow):
       row["Flow"] = flow_obj
       row["State"] = int(flow_obj.flow_state)
-      row["ReplyCount"] = spanner_lib.UInt64(flow_obj.num_replies_sent)
-      row["NetworkBytesSent"] = spanner_lib.UInt64(flow_obj.network_bytes_sent)
+      row["ReplyCount"] = int(flow_obj.num_replies_sent)
+      row["NetworkBytesSent"] = int(flow_obj.network_bytes_sent)
       row["UserCpuTimeUsed"] = float(flow_obj.cpu_time_used.user_cpu_time)
       row["SystemCpuTimeUsed"] = float(flow_obj.cpu_time_used.system_cpu_time)
     if isinstance(flow_state, flows_pb2.Flow.FlowState.ValueType):
@@ -482,7 +482,7 @@ class FlowsMixin:
 
     try:
       self.db.Update(table="Flows", row=row, txn_tag="UpdateFlow")
-    except spanner_errors.RowNotFoundError as error:
+    except NotFound as error:
       raise db.UnknownFlowError(client_id, flow_id, cause=error)
 
   @db_utils.CallLogged
@@ -740,7 +740,7 @@ class FlowsMixin:
       key = (
           spanner_clients.IntClientID(r.client_id),
           IntFlowID(r.flow_id),
-          spanner_lib.CommitTimestamp(),
+          spanner_lib.COMMIT_TIMESTAMP,
       )
 
       ts = None
@@ -886,7 +886,7 @@ class FlowsMixin:
               "NextResponseId": r.next_response_id,
               "CallbackState": r.callback_state,
               "Payload": r,
-              "CreationTime": spanner_lib.CommitTimestamp(),
+              "CreationTime": spanner_lib.COMMIT_TIMESTAMP,
           }
           if r.start_time:
             update_dict["StartTime"] = (
@@ -938,7 +938,7 @@ class FlowsMixin:
 
     try:
       self.db.Transact(Txn, txn_tag="WriteFlowRequests")
-    except spanner_errors.RowNotFoundError as error:
+    except NotFound as error:
       if "Parent row is missing: Flows" in str(error):
         raise db.AtLeastOneUnknownFlowError(flow_keys, cause=error)
       else:
@@ -1064,7 +1064,7 @@ class FlowsMixin:
             "Response": None,
             "Status": None,
             "Iterator": None,
-            "CreationTime": spanner_lib.CommitTimestamp(),
+            "CreationTime": spanner_lib.COMMIT_TIMESTAMP,
         }
 
         if isinstance(r, flows_pb2.FlowResponse):
@@ -1601,7 +1601,7 @@ class FlowsMixin:
     try:
       self.db.Mutate(Mutation, txn_tag="DeleteFlowRequests")
     # TODO(b/196379916): Narrow the exception types (cl/450440276).
-    except spanner_errors.BadUsageError:
+    except Exception:
       if len(requests) == 1:
         # If there is only one request and we still hit Spanner limits it means
         # that the requests has a lot of responses. It should be extremely rare
@@ -1765,7 +1765,7 @@ class FlowsMixin:
     row = {
         "ClientId": spanner_clients.IntClientID(entry.client_id),
         "FlowId": IntFlowID(entry.flow_id),
-        "CreationTime": spanner_lib.CommitTimestamp(),
+        "CreationTime": spanner_lib.COMMIT_TIMESTAMP,
         "Message": entry.message,
     }
 
@@ -1774,7 +1774,7 @@ class FlowsMixin:
 
     try:
       self.db.Insert(table="FlowLogEntries", row=row)
-    except spanner_errors.RowNotFoundError as error:
+    except NotFound as error:
       raise db.UnknownFlowError(entry.client_id, entry.flow_id) from error
 
   def ReadFlowLogEntries(
@@ -1873,13 +1873,13 @@ class FlowsMixin:
             "LogLevel": log.level,
             "LogTime": log.timestamp.ToDatetime(),
             "LogMessage": log.message,
-            "CreationTime": spanner_lib.CommitTimestamp(),
+            "CreationTime": spanner_lib.COMMIT_TIMESTAMP,
         }
         mut.Insert(table="FlowRRGLogs", row=row)
 
     try:
       self.db.Mutate(Mutation)
-    except spanner_errors.RowNotFoundError as error:
+    except NotFound as error:
       raise db.UnknownFlowError(client_id, flow_id, cause=error) from error
 
   @db_utils.CallLogged
@@ -1942,7 +1942,7 @@ class FlowsMixin:
         "ClientId": spanner_clients.IntClientID(entry.client_id),
         "FlowId": IntFlowID(entry.flow_id),
         "OutputPluginId": IntOutputPluginID(entry.output_plugin_id),
-        "CreationTime": spanner_lib.CommitTimestamp(),
+        "CreationTime": spanner_lib.COMMIT_TIMESTAMP,
         "Type": int(entry.log_entry_type),
         "Message": entry.message,
     }
@@ -1952,7 +1952,7 @@ class FlowsMixin:
 
     try:
       self.db.Insert(table="FlowOutputPluginLogEntries", row=row)
-    except spanner_errors.RowNotFoundError as error:
+    except NotFound as error:
       raise db.UnknownFlowError(entry.client_id, entry.flow_id) from error
 
   @db_utils.CallLogged
@@ -2072,7 +2072,7 @@ class FlowsMixin:
 
     try:
       self.db.InsertOrUpdate(table="ScheduledFlows", row=row)
-    except spanner_errors.RowNotFoundError as error:
+    except NotFound as error:
       if "Parent row is missing: Clients" in str(error):
         raise db.UnknownClientError(scheduled_flow.client_id) from error
       elif "fk_creator_users_username" in str(error):
@@ -2099,7 +2099,7 @@ class FlowsMixin:
     def Transaction(txn) -> None:
       try:
         txn.Read(table="ScheduledFlows", cols=["ScheduledFlowId"], key=key)
-      except spanner_errors.RowNotFoundError as e:
+      except NotFound as e:
         raise db.UnknownScheduledFlowError(
             client_id=client_id,
             creator=creator,
@@ -2313,7 +2313,7 @@ class FlowsMixin:
     try:
       row = txn.Read(table="Hunts", key=(IntHuntID(hunt_id),), cols=("State",))
       return row["State"]
-    except spanner_errors.RowNotFoundError:
+    except NotFound:
       return None
 
   @db_utils.CallLogged
@@ -2335,7 +2335,7 @@ class FlowsMixin:
             key=(int_client_id, int_flow_id),
             cols=_READ_FLOW_OBJECT_COLS,
         )
-      except spanner_errors.RowNotFoundError as error:
+      except NotFound as error:
         raise db.UnknownFlowError(client_id, flow_id, cause=error)
 
       flow = _ParseReadFlowObjectRow(client_id, flow_id, row)
@@ -2381,7 +2381,7 @@ class FlowsMixin:
                       flow.processing_deadline
                   ).AsDatetime()
               ),
-              "ProcessingStartTime": spanner_lib.CommitTimestamp(),
+              "ProcessingStartTime": spanner_lib.COMMIT_TIMESTAMP,
           },
       )
 
@@ -2418,7 +2418,7 @@ class FlowsMixin:
               < rdfvalue.RDFDatetime.Now()
           ):
             return False
-      except spanner_errors.RowNotFoundError:
+      except NotFound:
         pass
       txn.Update(
           table="Flows",
@@ -2431,16 +2431,16 @@ class FlowsMixin:
               "SystemCpuTimeUsed": float(
                   flow_obj.cpu_time_used.system_cpu_time
               ),
-              "NetworkBytesSent": spanner_lib.UInt64(
+              "NetworkBytesSent": int(
                   flow_obj.network_bytes_sent
               ),
               "ProcessingWorker": None,
               "ProcessingStartTime": None,
               "ProcessingEndTime": None,
-              "NextRequesttoProcess": spanner_lib.UInt64(
+              "NextRequesttoProcess": int(
                   flow_obj.next_request_to_process
               ),
-              "UpdateTime": spanner_lib.CommitTimestamp(),
+              "UpdateTime": spanner_lib.COMMIT_TIMESTAMP,
               "ReplyCount": flow_obj.num_replies_sent,
           },
       )

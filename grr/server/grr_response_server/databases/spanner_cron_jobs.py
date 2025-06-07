@@ -4,6 +4,8 @@
 import datetime
 from typing import Any, Mapping, Optional, Sequence
 
+from google.cloud import spanner as spanner_lib
+
 from grr_response_core.lib import rdfvalue
 from grr_response_core.lib import utils
 from grr_response_proto import flows_pb2
@@ -29,7 +31,19 @@ class CronJobsMixin:
       cronjob: A flows_pb2.CronJob object.
     """
     # We currently expect to reuse `created_at` if set.
+    rdf_created_at = rdfvalue.RDFDatetime().FromMicrosecondsSinceEpoch(
+        cronjob.created_at
+    )
+    creation_time = rdf_created_at.AsDatetime() or spanner_lib.COMMIT_TIMESTAMP
 
+    row = {
+        "JobId": cronjob.cron_job_id,
+        "Job": cronjob,
+        "Enabled": bool(cronjob.enabled),
+        "CreationTime": creation_time,
+    }
+
+    self.db.InsertOrUpdate(table="CronJobs", row=row, txn_tag="WriteCronJob")
 
   @db_utils.CallLogged
   @db_utils.CallAccounted

@@ -3,6 +3,10 @@
 
 from typing import AbstractSet, Callable, Collection, Iterable, List, Mapping, Optional, Sequence
 
+from google.api_core.exceptions import AlreadyExists
+
+from google.cloud import spanner as spanner_lib
+
 from google.protobuf import any_pb2
 from grr_response_core.lib import rdfvalue
 from grr_response_core.lib.rdfvalues import client as rdf_client
@@ -27,7 +31,30 @@ class HuntsMixin:
   @db_utils.CallAccounted
   def WriteHuntObject(self, hunt_obj: hunts_pb2.Hunt):
     """Writes a hunt object to the database."""
+    row = {
+        "HuntId": hunt_obj.hunt_id,
+        "CreationTime": spanner_lib.COMMIT_TIMESTAMP,
+        "LastUpdateTime": spanner_lib.COMMIT_TIMESTAMP,
+        "Creator": hunt_obj.creator,
+        "DurationMicros": hunt_obj.duration * 10**6,
+        "Description": hunt_obj.description,
+        "ClientRate": float(hunt_obj.client_rate),
+        "ClientLimit": hunt_obj.client_limit,
+        "State": int(hunt_obj.hunt_state),
+        "StateReason": int(hunt_obj.hunt_state_reason),
+        "StateComment": hunt_obj.hunt_state_comment,
+        "InitStartTime": None,
+        "LastStartTime": None,
+        "ClientCountAtStartTime": hunt_obj.num_clients_at_start_time,
+        "Hunt": hunt_obj,
+    }
 
+    try:
+      self.db.Insert(table="Hunts", row=row, txn_tag="WriteHuntObject")
+    except AlreadyExists as error:
+      raise abstract_db.DuplicatedHuntError(
+          hunt_id=hunt_obj.hunt_id, cause=error
+      )
 
 
   @db_utils.CallLogged
