@@ -18,9 +18,8 @@ class ForemanRulesMixin:
   @db_utils.CallAccounted
   def WriteForemanRule(self, rule: jobs_pb2.ForemanCondition) -> None:
     """Writes a foreman rule to the database."""
-    hunt_id_int = db_utils.HuntIDToInt(rule.hunt_id)
     row = {
-        "HuntId": hunt_id_int,
+        "HuntId": rule.hunt_id_int,
         "ExpirationTime": (
             rdfvalue.RDFDatetime()
             .FromMicrosecondsSinceEpoch(rule.expiration_time)
@@ -36,9 +35,8 @@ class ForemanRulesMixin:
   @db_utils.CallAccounted
   def RemoveForemanRule(self, hunt_id: str) -> None:
     """Removes a foreman rule from the database."""
-    hunt_id_int = db_utils.HuntIDToInt(hunt_id)
     self.db.Delete(
-        table="ForemanRules", key=(hunt_id_int), txn_tag="RemoveForemanRule"
+        table="ForemanRules", key=[hunt_id], txn_tag="RemoveForemanRule"
     )
 
 

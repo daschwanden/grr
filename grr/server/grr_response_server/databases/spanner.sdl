@@ -312,9 +312,9 @@ CREATE INDEX ClientKeywordsByKeywordCreationTime
 
 CREATE TABLE Flows(
   ClientId STRING(18) NOT NULL,
-  FlowId STRING(8) NOT NULL,
-  ParentFlowId STRING(8),
-  ParentHuntId STRING(8),
+  FlowId STRING(16) NOT NULL,
+  ParentFlowId STRING(16),
+  ParentHuntId STRING(16),
   LongFlowId STRING(256) NOT NULL,
   Creator STRING(256) NOT NULL,
   Name STRING(256) NOT NULL,
@@ -348,8 +348,8 @@ CREATE INDEX FlowsByParentHuntIdFlowIdState
 
 CREATE TABLE FlowResults(
   ClientId STRING(18) NOT NULL,
-  FlowId STRING(8) NOT NULL,
-  HuntId STRING(8),
+  FlowId STRING(16) NOT NULL,
+  HuntId STRING(16),
   CreationTime TIMESTAMP NOT NULL,
   Payload `google.protobuf.Any`,
   RdfType STRING(MAX),
@@ -366,8 +366,8 @@ CREATE INDEX FlowResultsByHuntIdFlowIdRdfTypeTagCreationTime
 
 CREATE TABLE FlowErrors(
   ClientId STRING(18) NOT NULL,
-  FlowId STRING(8) NOT NULL,
-  HuntId STRING(8) NOT NULL,
+  FlowId STRING(16) NOT NULL,
+  HuntId STRING(16) NOT NULL,
   CreationTime TIMESTAMP NOT NULL,
   Payload `google.protobuf.Any`,
   RdfType STRING(MAX),
@@ -382,11 +382,11 @@ CREATE INDEX FlowErrorsByHuntIdFlowIdRdfTypeTagCreationTime
 
 CREATE TABLE FlowRequests(
   ClientId STRING(18) NOT NULL,
-  FlowId STRING(8) NOT NULL,
-  RequestId STRING(8) NOT NULL,
+  FlowId STRING(16) NOT NULL,
+  RequestId STRING(16) NOT NULL,
   NeedsProcessing BOOL,
   ExpectedResponseCount INT64,
-  NextResponseId STRING(8),
+  NextResponseId STRING(16),
   CallbackState STRING(256),
   Payload `grr.FlowRequest` NOT NULL,
   StartTime TIMESTAMP,
@@ -397,9 +397,9 @@ CREATE TABLE FlowRequests(
 
 CREATE TABLE FlowResponses(
   ClientId STRING(18) NOT NULL,
-  FlowId STRING(8) NOT NULL,
-  RequestId STRING(8) NOT NULL,
-  ResponseId STRING(8) NOT NULL,
+  FlowId STRING(16) NOT NULL,
+  RequestId STRING(16) NOT NULL,
+  ResponseId STRING(16) NOT NULL,
   Response `grr.FlowResponse`,
   Status `grr.FlowStatus`,
   Iterator `grr.FlowIterator`,
@@ -414,8 +414,8 @@ CREATE TABLE FlowResponses(
 
 CREATE TABLE FlowLogEntries(
   ClientId STRING(18) NOT NULL,
-  FlowId STRING(8) NOT NULL,
-  HuntId STRING(8),
+  FlowId STRING(16) NOT NULL,
+  HuntId STRING(16),
   CreationTime TIMESTAMP NOT NULL OPTIONS (allow_commit_timestamp = true),
   Message STRING(MAX) NOT NULL,
 ) PRIMARY KEY (ClientId, FlowId, CreationTime),
@@ -426,9 +426,9 @@ CREATE INDEX FlowLogEntriesByHuntIdCreationTime
 
 CREATE TABLE FlowRRGLogs(
   ClientId STRING(18) NOT NULL,
-  FlowId STRING(8) NOT NULL,
-  RequestId STRING(8) NOT NULL,
-  ResponseId STRING(8) NOT NULL,
+  FlowId STRING(16) NOT NULL,
+  RequestId STRING(16) NOT NULL,
+  ResponseId STRING(16) NOT NULL,
   LogLevel `rrg.Log.Level` NOT NULL,
   LogTime TIMESTAMP NOT NULL,
   LogMessage STRING(MAX) NOT NULL,
@@ -438,9 +438,9 @@ CREATE TABLE FlowRRGLogs(
 
 CREATE TABLE FlowOutputPluginLogEntries(
   ClientId STRING(18) NOT NULL,
-  FlowId STRING(8) NOT NULL,
+  FlowId STRING(16) NOT NULL,
   OutputPluginId STRING(8) NOT NULL,
-  HuntId STRING(8),
+  HuntId STRING(16),
   CreationTime TIMESTAMP NOT NULL OPTIONS (allow_commit_timestamp = true),
   Type `grr.FlowOutputPluginLogEntry.LogEntryType` NOT NULL,
   Message STRING(MAX) NOT NULL,
@@ -453,7 +453,7 @@ CREATE INDEX FlowOutputPluginLogEntriesByHuntIdCreationTime
 CREATE TABLE ScheduledFlows(
   ClientId STRING(18) NOT NULL,
   Creator STRING(256) NOT NULL,
-  ScheduledFlowId STRING(8) NOT NULL,
+  ScheduledFlowId STRING(16) NOT NULL,
   FlowName STRING(256) NOT NULL,
   FlowArgs `google.protobuf.Any` NOT NULL,
   RunnerArgs `grr.FlowRunnerArgs` NOT NULL,

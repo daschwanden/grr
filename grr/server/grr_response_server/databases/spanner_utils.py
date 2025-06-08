@@ -153,6 +153,11 @@ class Database:
         return param_types.TIMESTAMP
     elif py_type is decimal.Decimal:
         return param_types.NUMERIC
+    elif py_type is list:
+        if len(value) > 0:
+          return param_types.Array(self._get_param_type(value[0]))
+        else:
+          raise TypeError(f"Empty value for Python type: {py_type.__name__} for Spanner type conversion.")
     else:
         # Potentially raise an error for unsupported types or return None
         # For a generic solution, raising an error for unknown types is often safer.
@@ -490,15 +495,13 @@ class Database:
     Returns:
       A mapping from columns to values of the read row.
     """
-    range = KeyRange(start_closed=key, end_closed=key)
-    keyset = KeySet(ranges=[range])
+    keyset = KeySet(keys=[key])
     with self._pyspanner.snapshot() as snapshot:
         results = snapshot.read(
             table=table,
             columns=cols,
             keyset=keyset
         )
-    
     return results.one()
 
   def ReadSet(

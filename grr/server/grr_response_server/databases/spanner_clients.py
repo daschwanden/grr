@@ -159,24 +159,12 @@ class ClientsMixin:
 
     try:
       self.db.Mutate(Mutation, txn_tag="MultiAddClientLabels")
-    except NotFound as error:
+    except Exception as error:
       message = str(error)
-      if "Parent row is missing: Clients" in message:
+      if "Parent row for row [" in message:
         raise db_lib.AtLeastOneUnknownClientError(client_ids) from error
       elif "fk_client_label_owner_username" in message:
-        match = re.search(
-            r"\((?P<username>\w+)\) in Users\(Username\)",
-            message,
-        )
-        if match is not None:
-          username = match["username"]
-        else:
-          username = "<UNKNOWN>"
-          logging.error(
-              "Couldn't extract username from foreign key constraint: %s",
-              message,
-          )
-        raise db_lib.UnknownGRRUserError(username=username, cause=error)
+        raise db_lib.UnknownGRRUserError(username=owner, cause=error)
       else:
         raise
 
@@ -221,9 +209,11 @@ class ClientsMixin:
   ) -> None:
     """Removes a list of user labels from a given client."""
 
-    def Mutation(mut: spanner_utils.Mutation) -> None:
+    def Mutation(mut) -> None:
+      keys = []
       for label in labels:
-        mut.Delete(table="ClientLabels", key=(client_id, owner, label))
+        keys.append([client_id, owner, label])
+      mut.delete(table="ClientLabels", keyset=spanner_lib.KeySet(keys=keys))
 
     self.db.Mutate(Mutation, txn_tag="RemoveClientLabels")
 
@@ -371,7 +361,7 @@ class ClientsMixin:
 
       mut.insert(table="ClientStartups",
                  columns=["ClientId", "CreationTime", "Startup"],
-                 values=[client_id ,spanner_lib.COMMIT_TIMESTAMP, startup])
+                 values=[[client_id ,spanner_lib.COMMIT_TIMESTAMP, startup]])
 
     try:
       self.db.Mutate(Mutation, txn_tag="WriteClientStartupInfo")
@@ -428,7 +418,7 @@ class ClientsMixin:
       (startup_bytes,) = self.db.ParamQuerySingle(
           query, params, txn_tag="ReadClientRRGStartup"
       )
-    except iterator.NoYieldsError:
+    except NotFound:
       raise db_lib.UnknownClientError(client_id)  # pylint: disable=raise-missing-from
 
     if startup_bytes is None:
@@ -457,7 +447,7 @@ class ClientsMixin:
       (creation_time, startup_bytes) = self.db.ParamQuerySingle(
           query, params, txn_tag="ReadClientStartupInfo"
       )
-    except iterator.NoYieldsError:
+    except NotFound:
       return None
 
     startup = jobs_pb2.StartupInfo()
@@ -509,7 +499,7 @@ class ClientsMixin:
       (creation_time, crash_bytes) = self.db.ParamQuerySingle(
           query, params, txn_tag="ReadClientCrashInfo"
       )
-    except iterator.NoYieldsError:
+    except NotFound:
       return None
 
     crash = jobs_pb2.ClientCrash()
@@ -757,19 +747,17 @@ class ClientsMixin:
   def DeleteClient(self, client_id: str) -> None:
     """Deletes a client with all associated metadata."""
 
-    def Transaction(txn: spanner_utils.Transaction) -> None:
+    def Transaction(txn) -> None:
       # It looks like Spanner does not raise exception if we attempt to delete
       # a non-existing row, so we have to verify row existence ourself.
+      keyrange = spanner_lib.KeyRange(start_closed=[client_id], end_closed=[client_id])
+      keyset = spanner_lib.KeySet(ranges=[keyrange])
       try:
-        txn.Read(table="Clients", key=(client_id,), cols=[])
+        txn.read(table="Clients", keyset=keyset, columns=["ClientId"]).one()
       except NotFound as error:
         raise db_lib.UnknownClientError(client_id, cause=error)
 
-      with txn.Mutate() as mut:
-        mut.Delete(table="Clients", key=(client_id,))
-        mut.DeleteWithPrefix(table="ClientSnapshots", key=(client_id,))
-        mut.DeleteWithPrefix(table="ClientStartups", key=(client_id,))
-        mut.DeleteWithPrefix(table="ClientCrashes", key=(client_id,))
+      txn.delete(table="Clients", keyset=keyset)
 
     self.db.Transact(Transaction, txn_tag="DeleteClient")
 
@@ -815,7 +803,7 @@ class ClientsMixin:
      WHERE k.Keyword IN UNNEST({keywords})
     """
     params = {
-        "keywords": spanner_lib.Array(str, keywords),
+        "keywords": list(keywords),
     }
 
     if start_time is not None:
@@ -844,7 +832,4 @@ class ClientsMixin:
 
 _EPOCH = datetime.datetime.fromtimestamp(0, datetime.timezone.utc)
 
-# pylint: disable=line-too-long
-# [1]: https://g3doc.corp.google.com/spanner/g3doc/userguide/sqlv1/data-manipulation-language.md#a-note-about-locking
-# pylint: enable=line-too-long
 _DELETE_BATCH_SIZE = 5_000

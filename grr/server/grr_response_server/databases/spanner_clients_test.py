@@ -1,9 +1,9 @@
 from absl.testing import absltest
 
-from grr.server.grr_response_server.databases import db
-from grr.server.grr_response_server.databases import db_clients_test
-from grr.server.grr_response_server.databases import db_test_utils
-from grr.server.grr_response_server.databases import spanner_test_lib
+from grr_response_server.databases import db
+from grr_response_server.databases import db_clients_test
+from grr_response_server.databases import db_test_utils
+from grr_response_server.databases import spanner_test_lib
 
 
 def setUpModule() -> None:
@@ -19,8 +19,6 @@ class SpannerDatabaseClientsTest(
 ):
   # Test methods are defined in the base mixin class.
 
-  # TODO(b/196379916): Enforce this constraint in other database implementations
-  # and move this test to `DatabaseTestClientsMixin`.
   def testLabelWriteToUnknownUser(self):
     client_id = db_test_utils.InitializeClient(self.db)
 
