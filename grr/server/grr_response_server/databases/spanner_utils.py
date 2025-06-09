@@ -100,7 +100,7 @@ class Database:
     self.project_id = project_id
     self.publisher = pubsub_v1.PublisherClient()
     self.subscriber = pubsub_v1.SubscriberClient()
-    self.flow_proccessing_sub_path = self.subscriber.subscription_path(project_id, flow_processing_sub_id)
+    self.flow_processing_sub_path = self.subscriber.subscription_path(project_id, flow_processing_sub_id)
     self.flow_processing_top_path = self.publisher.topic_path(project_id, flow_processing_top_id)
     self.message_handler_sub_path = self.subscriber.subscription_path(project_id, msg_handler_sub_id)
     self.message_handler_top_path = self.publisher.topic_path(project_id, msg_handler_top_id)

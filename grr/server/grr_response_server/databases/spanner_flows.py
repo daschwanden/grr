@@ -4,6 +4,7 @@
 import dataclasses
 import datetime
 import logging
+from time import sleep
 from typing import Any, Callable, Collection, Dict, Iterable, List, Mapping, Optional, Sequence, Set, Tuple, Union
 
 from google.api_core.exceptions import AlreadyExists, NotFound
@@ -87,8 +88,8 @@ def _BuildReadFlowResultsErrorsConditions(
   WHERE t.ClientId = {client_id} AND t.FlowId = {flow_id}
   """
 
-  params["client_id"] = spanner_clients.IntClientID(client_id)
-  params["flow_id"] = IntFlowID(flow_id)
+  params["client_id"] = client_id
+  params["flow_id"] = flow_id
 
   if with_tag is not None:
     query += " AND t.Tag = {tag} "
@@ -132,8 +133,8 @@ def _BuildCountFlowResultsErrorsConditions(
   WHERE t.ClientId = {client_id} AND t.FlowId = {flow_id}
   """
 
-  params["client_id"] = spanner_clients.IntClientID(client_id)
-  params["flow_id"] = IntFlowID(flow_id)
+  params["client_id"] = client_id
+  params["flow_id"] = flow_id
 
   if with_tag is not None:
     query += " AND t.Tag = {tag} "
@@ -171,51 +172,51 @@ def _ParseReadFlowObjectRow(
 ) -> flows_pb2.Flow:
   """Parses a row fetched with _READ_FLOW_OBJECT_COLS."""
   result = flows_pb2.Flow()
-  result.ParseFromString(row["Flow"])
+  result.ParseFromString(row[13])
 
-  creation_time = rdfvalue.RDFDatetime.FromDatetime(row["CreationTime"])
-  update_time = rdfvalue.RDFDatetime.FromDatetime(row["UpdateTime"])
+  creation_time = rdfvalue.RDFDatetime.FromDatetime(row[6])
+  update_time = rdfvalue.RDFDatetime.FromDatetime(row[7])
 
   # We treat column values as the source of truth for values, not the message
   # in the database itself. At least this is what the F1 implementation does.
   result.client_id = client_id
   result.flow_id = flow_id
-  result.long_flow_id = row["LongFlowId"]
+  result.long_flow_id = row[0]
 
-  if row["ParentFlowId"] is not None:
-    result.parent_flow_id = db_utils.IntToFlowID(row["ParentFlowId"])
-  if row["ParentHuntId"] is not None:
-    result.parent_hunt_id = db_utils.IntToHuntID(row["ParentHuntId"])
+  if row[1] is not None:
+    result.parent_flow_id = row[1]
+  if row[2] is not None:
+    result.parent_hunt_id = row[2]
 
-  if row["Name"] is not None:
-    result.flow_class_name = row["Name"]
-  if row["Creator"] is not None:
-    result.creator = row["Creator"]
-  if row["State"] not in [None, flows_pb2.Flow.FlowState.UNSET]:
-    result.flow_state = row["State"]
-  if row["NextRequestToProcess"]:
-    result.next_request_to_process = row["NextRequestToProcess"]
+  if row[4] is not None:
+    result.flow_class_name = row[4]
+  if row[3] is not None:
+    result.creator = row[3]
+  if row[5] not in [None, flows_pb2.Flow.FlowState.UNSET]:
+    result.flow_state = row[5]
+  if row[12]:
+    result.next_request_to_process = int(row[12])
 
   result.create_time = int(creation_time)
   result.last_update_time = int(update_time)
 
-  if row["Crash"] is not None:
+  if row[8] is not None:
     client_crash = jobs_pb2.ClientCrash()
-    client_crash.ParseFromString(row["Crash"])
+    client_crash.ParseFromString(row[8])
     result.client_crash_info.CopyFrom(client_crash)
 
   result.ClearField("processing_on")
-  if row["ProcessingWorker"] is not None:
-    result.processing_on = row["ProcessingWorker"]
+  if row[9] is not None:
+    result.processing_on = row[9]
   result.ClearField("processing_since")
-  if row["ProcessingStartTime"] is not None:
+  if row[10] is not None:
     result.processing_since = int(
-        rdfvalue.RDFDatetime.FromDatetime(row["ProcessingStartTime"])
+        rdfvalue.RDFDatetime.FromDatetime(row[10])
     )
   result.ClearField("processing_deadline")
-  if row["ProcessingEndTime"] is not None:
+  if row[11] is not None:
     result.processing_deadline = int(
-        rdfvalue.RDFDatetime.FromDatetime(row["ProcessingEndTime"])
+        rdfvalue.RDFDatetime.FromDatetime(row[11])
     )
 
   return result
@@ -368,10 +369,10 @@ class FlowsMixin:
     conds = []
 
     if client_id is not None:
-      params["client_id"] = spanner_clients.IntClientID(client_id)
+      params["client_id"] = client_id
       conds.append("f.ClientId = {client_id}")
     if parent_flow_id is not None:
-      params["parent_flow_id"] = IntFlowID(parent_flow_id)
+      params["parent_flow_id"] = parent_flow_id
       conds.append("f.ParentFlowId = {parent_flow_id}")
     if min_create_time is not None:
       params["min_creation_time"] = min_create_time.AsDatetime()
@@ -382,30 +383,30 @@ class FlowsMixin:
     if not include_child_flows:
       conds.append("f.ParentFlowId IS NULL")
     if not_created_by is not None:
-      params["not_created_by"] = spanner_lib.Array(str, not_created_by)
+      params["not_created_by"] = list(not_created_by)
       conds.append("f.Creator NOT IN UNNEST({not_created_by})")
 
     if conds:
       query += f" WHERE {' AND '.join(conds)}"
 
     for row in self.db.ParamQuery(query, params, txn_tag="ReadAllFlowObjects"):
-      int_client_id, int_flow_id, long_flow_id, *row = row
-      int_parent_flow_id, int_parent_hunt_id, *row = row
+      client_id, flow_id, long_flow_id, *row = row
+      parent_flow_id, parent_hunt_id, *row = row
       creator, name, state, *row = row
       creation_time, update_time, *row = row
       crash_bytes, next_request_to_process, flow_bytes = row
 
       flow = flows_pb2.Flow()
       flow.ParseFromString(flow_bytes)
-      flow.client_id = db_utils.IntToClientID(int_client_id)
-      flow.flow_id = db_utils.IntToFlowID(int_flow_id)
+      flow.client_id = client_id
+      flow.flow_id = flow_id
       flow.long_flow_id = long_flow_id
-      flow.next_request_to_process = next_request_to_process
+      flow.next_request_to_process = int(next_request_to_process)
 
-      if int_parent_flow_id is not None:
-        flow.parent_flow_id = db_utils.IntToFlowID(int_parent_flow_id)
-      if int_parent_hunt_id is not None:
-        flow.parent_hunt_id = db_utils.IntToHuntID(int_parent_hunt_id)
+      if parent_flow_id is not None:
+        flow.parent_flow_id = parent_flow_id
+      if parent_hunt_id is not None:
+        flow.parent_hunt_id = parent_hunt_id
 
       flow.creator = creator
       flow.flow_state = state
@@ -449,8 +450,8 @@ class FlowsMixin:
     """Updates flow objects in the database."""
 
     row = {
-        "ClientId": spanner_clients.IntClientID(client_id),
-        "FlowId": IntFlowID(flow_id),
+        "ClientId": client_id,
+        "FlowId": flow_id,
         "UpdateTime": spanner_lib.COMMIT_TIMESTAMP,
     }
 
@@ -489,18 +490,20 @@ class FlowsMixin:
     """Writes flow results for a given flow."""
 
     def Mutation(mut) -> None:
+      rows = []
+      columns = ["ClientId", "FlowId", "HuntId", "CreationTime",
+                 "Tag", "RdfType", "Payload"]
       for r in results:
-        row = {
-            "ClientId": spanner_clients.IntClientID(r.client_id),
-            "FlowId": IntFlowID(r.flow_id),
-            "HuntId": IntHuntID(r.hunt_id) if r.hunt_id else 0,
-            "CreationTime": rdfvalue.RDFDatetime.Now().AsDatetime(),
-            "Tag": r.tag,
-            "RdfType": db_utils.TypeURLToRDFTypeName(r.payload.type_url),
-            "Payload": r.payload,
-        }
-
-        mut.Insert("FlowResults", row)
+        rows.append([
+            r.client_id,
+            r.flow_id,
+            r.hunt_id if r.hunt_id else "0",
+            rdfvalue.RDFDatetime.Now().AsDatetime(),
+            r.tag,
+            db_utils.TypeURLToRDFTypeName(r.payload.type_url),
+            r.payload,
+        ])
+      mut.insert(table="FlowResults", columns=columns, values=rows)
 
     self.db.Mutate(Mutation, txn_tag="WriteFlowResults")
 
@@ -510,17 +513,19 @@ class FlowsMixin:
     """Writes flow errors for a given flow."""
 
     def Mutation(mut) -> None:
+      rows = []
+      columns = ["ClientId", "FlowId", "HuntId",
+                 "CreationTime", "Payload", "RdfType", "Tag"]
       for r in errors:
-        row = {
-            "ClientId": spanner_clients.IntClientID(r.client_id),
-            "FlowId": IntFlowID(r.flow_id),
-            "HuntId": IntHuntID(r.hunt_id) if r.hunt_id else 0,
-            "CreationTime": rdfvalue.RDFDatetime.Now().AsDatetime(),
-            "Payload": r.payload,
-            "RdfType": db_utils.TypeURLToRDFTypeName(r.payload.type_url),
-            "Tag": r.tag,
-        }
-        mut.Insert("FlowErrors", row)
+        rows.append([r.client_id,
+                     r.flow_id,
+                     r.hunt_id if r.hunt_id else "0",
+                     rdfvalue.RDFDatetime.Now().AsDatetime(),
+                     r.payload,
+                     db_utils.TypeURLToRDFTypeName(r.payload.type_url),
+                     r.tag,
+        ])
+      mut.insert(table="FlowErrors", columns=columns, values=rows)
 
     self.db.Mutate(Mutation, txn_tag="WriteFlowErrors")
 
@@ -564,7 +569,7 @@ class FlowsMixin:
       result.payload.ParseFromString(payload_bytes)
 
       if hunt_id is not None:
-        result.hunt_id = db_utils.IntToHuntID(hunt_id)
+        result.hunt_id = hunt_id
 
       if tag is not None:
         result.tag = tag
@@ -626,7 +631,7 @@ class FlowsMixin:
         error.payload.Pack(unrecognized)
 
       if hunt_id is not None:
-        error.hunt_id = db_utils.IntToHuntID(hunt_id)
+        error.hunt_id = hunt_id
 
       if tag is not None:
         error.tag = tag
@@ -688,8 +693,8 @@ class FlowsMixin:
     """
 
     params = {
-        "client_id": spanner_clients.IntClientID(client_id),
-        "flow_id": IntFlowID(flow_id),
+        "client_id": client_id,
+        "flow_id": flow_id,
     }
 
     result = {}
@@ -715,8 +720,8 @@ class FlowsMixin:
     """
 
     params = {
-        "client_id": spanner_clients.IntClientID(client_id),
-        "flow_id": IntFlowID(flow_id),
+        "client_id": client_id,
+        "flow_id": flow_id,
     }
 
     result = {}
@@ -729,31 +734,15 @@ class FlowsMixin:
 
   def _BuildFlowProcessingRequestWrites(
       self,
-      mut: spanner_utils.Mutation,
       requests: Iterable[flows_pb2.FlowProcessingRequest],
   ) -> None:
-    """Builds db writes for a list of FlowProcessingRequests."""
+    """Writes a list of FlowProcessingRequests to the queue."""
+    flowProcessingRequests = []
+    for request in requests:
+      flowProcessingRequests.append(request.SerializeToString())
 
-    for r in requests:
-      key = (
-          r.client_id,
-          r.flow_id,
-          spanner_lib.COMMIT_TIMESTAMP,
-      )
+    self.db.PublishFlowProcessingRequests(flowProcessingRequests)
 
-      ts = None
-      if r.delivery_time:
-        ts = rdfvalue.RDFDatetime.FromMicrosecondsSinceEpoch(
-            r.delivery_time
-        ).AsDatetimeUTC()
-
-      mut.Send(
-          queue="FlowProcessingRequestsQueue",
-          key=key,
-          value=r,
-          column="Payload",
-          deliver_time=ts,
-      )
 
   @db_utils.CallLogged
   @db_utils.CallAccounted
@@ -763,11 +752,7 @@ class FlowsMixin:
   ) -> None:
     """Writes a list of flow processing requests to the database."""
 
-    ### TODO ###
-    #def Mutation(mut) -> None:
-    #  self._BuildFlowProcessingRequestWrites(mut, requests)
-    #
-    #self.db.Mutate(Mutation, txn_tag="WriteFlowProcessingRequests")
+    self._BuildFlowProcessingRequestWrites(requests)
 
   @db_utils.CallLogged
   @db_utils.CallAccounted
@@ -775,17 +760,14 @@ class FlowsMixin:
       self,
   ) -> Sequence[flows_pb2.FlowProcessingRequest]:
     """Reads all flow processing requests from the database."""
-    query = """
-    SELECT t.Payload, t.CreationTime FROM FlowProcessingRequestsQueue AS t
-    """
-
     results = []
-    for payload, creation_time in self.db.ParamQuery(
-        query, {}, txn_tag="ReadFlowProcessingRequests"
-    ):
+    for result in self.db.ReadFlowProcessingRequests():
       req = flows_pb2.FlowProcessingRequest()
-      req.ParseFromString(payload)
-      req.creation_time = int(rdfvalue.RDFDatetime.FromDatetime(creation_time))
+      req.ParseFromString(result["payload"])
+      req.creation_time = int(
+        rdfvalue.RDFDatetime.FromDatetime(result["publish_time"])
+      )
+      req.ack_id = result["ack_id"]
       results.append(req)
 
     return results
@@ -800,8 +782,8 @@ class FlowsMixin:
     def Mutation(mut) -> None:
       for r in requests:
         key = (
-            spanner_clients.IntClientID(r.client_id),
-            IntFlowID(r.flow_id),
+            r.client_id,
+            r.flow_id,
             rdfvalue.RDFDatetime.FromMicrosecondsSinceEpoch(
                 r.creation_time
             ).AsDatetime(),
@@ -825,25 +807,27 @@ class FlowsMixin:
     """Registers a handler to receive flow processing messages."""
     self.UnregisterFlowProcessingHandler()
 
-    def Callback(expanded_key: Sequence[Any], payload: bytes):
+    def Callback(payload: bytes, msg_id: str, ack_id: str, publish_time):
       try:
         req = flows_pb2.FlowProcessingRequest()
         req.ParseFromString(payload)
+        req.ack_id = ack_id
         req.creation_time = int(
-            rdfvalue.RDFDatetime.FromDatetime(expanded_key[2])
+            rdfvalue.RDFDatetime.FromDatetime(publish_time)
         )
         handler(req)
       except Exception as e:  # pylint: disable=broad-except
-        logging.exception("Exception raised during Flow processing: %s", e)
+        logging.exception(
+            "Exception raised during MessageHandlerRequest processing: %s", e
+        )
 
-    receiver = self.db.NewQueueReceiver(
-        "FlowProcessingRequestsQueue",
+    receiver = self.db.NewRequestQueue(
+        "FlowProcessing",
         Callback,
         receiver_max_keepalive_seconds=3000,
         receiver_max_active_callbacks=50,
         receiver_max_messages_per_callback=1,
     )
-    receiver.Receive()
     self._flow_processing_request_receiver = receiver
 
   def UnregisterFlowProcessingHandler(
@@ -900,7 +884,7 @@ class FlowsMixin:
         # .keys() should be omitted. Omitting keys leads to a
         # mistaken warning that .items() was not called.
         for client_id, flow_id in needs_processing:  # pylint: disable=dict-iter-missing-items
-          keys.Add((client_id, flow_id))
+          keys.append([client_id, flow_id])
 
         columns = (
           "ClientId",
@@ -921,11 +905,8 @@ class FlowsMixin:
                 req.delivery_time = r.start_time
               flow_processing_requests.append(req)
 
-        #if flow_processing_requests:
-        #  with txn.BufferedMutate() as mut:
-        #    self._BuildFlowProcessingRequestWrites(
-        #        mut, flow_processing_requests
-        #    )
+        if flow_processing_requests:
+          self._BuildFlowProcessingRequestWrites(flow_processing_requests)
 
     try:
       self.db.Transact(Txn, txn_tag="WriteFlowRequests")
@@ -1074,16 +1055,15 @@ class FlowsMixin:
       updates: dict mapping requests to the number of expected responses.
       txn: transaction to use for the writes.
     """
-
-    with txn.Mutate() as mut:
-      for r_key, num_responses_expected in updates.items():
-        row = {
-            "ClientId": spanner_clients.IntClientID(r_key.client_id),
-            "FlowId": IntFlowID(r_key.flow_id),
-            "RequestId": r_key.request_id,
-            "ExpectedResponseCount": num_responses_expected,
-        }
-        mut.Update("FlowRequests", row)
+    rows = []
+    columns = ["ClientId", "FlowId", "RequestId", "ExpectedResponseCount"]
+    for r_key, num_responses_expected in updates.items():
+      rows.append([r_key.client_id,
+                   r_key.flow_id,
+                   r_key.request_id,
+                   num_responses_expected,
+      ])
+      txn.update(table="FlowRequests", columns=columns, values=rows)
 
   def _WriteFlowResponsesAndExpectedUpdates(
       self,
@@ -1202,8 +1182,7 @@ class FlowsMixin:
 
   def _GetFlowResponsesPerRequestCounts(
       self,
-      request_keys: Iterable[_RequestKey],
-      txn,
+      request_keys: Iterable[_RequestKey]
   ) -> dict[_RequestKey, int]:
     """Gets counts of already received responses for given requests.
 
@@ -1231,9 +1210,9 @@ class FlowsMixin:
          fr.RequestId = {{request_id_{i}}})
       """)
 
-      params[f"client_id_{i}"] = db_utils.ClientIDToInt(req_key.client_id)
-      params[f"flow_id_{i}"] = db_utils.FlowIDToInt(req_key.flow_id)
-      params[f"request_id_{i}"] = req_key.request_id
+      params[f"client_id_{i}"] = req_key.client_id
+      params[f"flow_id_{i}"] = req_key.flow_id
+      params[f"request_id_{i}"] = str(req_key.request_id)
 
     query = f"""
     SELECT fr.ClientId, fr.FlowId, fr.RequestId, COUNT(*) AS ResponseCount
@@ -1243,12 +1222,12 @@ class FlowsMixin:
     """
 
     result = {}
-    for row in txn.ParamQuery(query, params):
-      client_id_int, flow_id_int, request_id, count = row
+    for row in self.db.ParamQuery(query, params):
+      client_id, flow_id, request_id, count = row
 
       req_key = _RequestKey(
-          db_utils.IntToClientID(client_id_int),
-          db_utils.IntToFlowID(flow_id_int),
+          client_id,
+          flow_id,
           request_id,
       )
       result[req_key] = count
@@ -1282,66 +1261,62 @@ class FlowsMixin:
       have to be notified of incoming responses. start_time in the tuple
       corresponds to the intended notification delivery time.
     """
-    flow_rows = spanner_lib.RowSet()
-    req_rows = spanner_lib.RowSet()
+    flow_keys = []
+    req_keys = []
 
     unique_flow_keys = set()
 
     for req_key in set(requests) | set(callback_states):
-      client_id_int = spanner_clients.IntClientID(req_key.client_id)
-      flow_id_int = IntFlowID(req_key.flow_id)
+      req_keys.append([req_key.client_id, req_key.flow_id, req_key.request_id])
+      unique_flow_keys.add((req_key.client_id, req_key.flow_id))
 
-      req_rows.AddPrefixRange(
-          spanner_lib.Key(client_id_int, flow_id_int, req_key.request_id)
-      )
-      unique_flow_keys.add((client_id_int, flow_id_int))
-
-    for client_id_int, flow_id_int in unique_flow_keys:
-      flow_rows.AddPrefixRange(spanner_lib.Key(client_id_int, flow_id_int))
+    for client_id, flow_id in unique_flow_keys:
+      flow_keys.append([client_id, flow_id])
 
     next_request_to_process_by_flow = {}
-    flow_cols = (
+    flow_cols = [
         "ClientId",
         "FlowId",
         "NextRequestToProcess",
-    )
-    for row in txn.ReadSet("Flows", flow_rows, flow_cols):
-      client_id_int: int = row["ClientId"]
-      flow_id_int: int = row["FlowId"]
-      next_request_id: int = row["NextRequestToProcess"]
-      next_request_to_process_by_flow[(client_id_int, flow_id_int)] = (
+    ]
+    for row in txn.read(table="Flows",
+                        keyset=spanner_lib.KeySet(keys=flow_keys),
+                        columns=flow_cols):
+      client_id: int = row[0]
+      flow_id: int = row[1]
+      next_request_id: int = row[2]
+      next_request_to_process_by_flow[(client_id, flow_id)] = (
           next_request_id
       )
 
     requests_to_mark = set()
     requests_to_notify = set()
-    req_cols = (
+    req_cols = [
         "ClientId",
         "FlowId",
         "RequestId",
         "NeedsProcessing",
         "StartTime",
-    )
-    for row in txn.ReadSet("FlowRequests", req_rows, req_cols):
-      client_id_int: int = row["ClientId"]
-      flow_id_int: int = row["FlowId"]
-      request_id: int = row["RequestId"]
-      np: bool = row["NeedsProcessing"]
+    ]
+    for row in txn.read(table="FlowRequests",
+                        keyset=spanner_lib.KeySet(keys=req_keys),
+                        columns=req_cols):
+      client_id: str = row[0]
+      flow_id: str = row[1]
+      request_id: str = row[2]
+      np: bool = row[3]
       start_time: Optional[rdfvalue.RDFDatetime] = None
-      if row["StartTime"] is not None:
-        start_time = rdfvalue.RDFDatetime.FromDatetime(row["StartTime"])
+      if row[4] is not None:
+        start_time = rdfvalue.RDFDatetime.FromDatetime(row[4])
 
       if not np:
-        client_id = db_utils.IntToClientID(client_id_int)
-        flow_id = db_utils.IntToFlowID(flow_id_int)
 
         req_key = _RequestKey(client_id, flow_id, request_id)
         if req_key in requests:
           requests_to_mark.add(req_key)
 
         if (
-            next_request_to_process_by_flow[(client_id_int, flow_id_int)]
-            == request_id
+            next_request_to_process_by_flow[(client_id, flow_id)] == request_id
         ):
           requests_to_notify.add((_FlowKey(client_id, flow_id), start_time))
 
@@ -1356,16 +1331,15 @@ class FlowsMixin:
       requests: keys of requests to be updated.
       txn: transaction to use.
     """
-
-    with txn.Mutate() as mut:
-      for req_key in requests:
-        row = {
-            "ClientId": spanner_clients.IntClientID(req_key.client_id),
-            "FlowId": IntFlowID(req_key.flow_id),
-            "RequestId": req_key.request_id,
-            "NeedsProcessing": True,
-        }
-        mut.Update("FlowRequests", row)
+    rows = []
+    columns = ["ClientId", "FlowId", "RequestId", "NeedsProcessing"]
+    for req_key in requests:
+      rows.append([req_key.client_id,
+                   req_key.flow_id,
+                   req_key.request_id,
+                   True,
+      ])
+    txn.update(table="FlowRequests", columns=columns, values=rows)
 
   def _UpdateNeedsProcessingAndWriteFlowProcessingRequests(
       self,
@@ -1407,8 +1381,7 @@ class FlowsMixin:
           fpr.delivery_time = int(start_time)
         flow_processing_requests.append(fpr)
 
-      with txn.BufferedMutate() as mut:
-        self._BuildFlowProcessingRequestWrites(mut, flow_processing_requests)
+      self._BuildFlowProcessingRequestWrites(flow_processing_requests)
 
   @db_utils.CallLogged
   @db_utils.CallAccounted
@@ -1438,9 +1411,8 @@ class FlowsMixin:
       return
 
     # Get actual per-request responses counts using a separate transaction.
-    read_txn = self.db.Snapshot()
     counts = self._GetFlowResponsesPerRequestCounts(
-        responses_expected_by_request, read_txn
+        responses_expected_by_request
     )
 
     requests_ready_for_processing = set()
@@ -1467,11 +1439,9 @@ class FlowsMixin:
       flow_id: str,
   ) -> None:
     """Deletes all requests and responses for a given flow from the database."""
-    int_client_id = spanner_clients.IntClientID(client_id)
-    int_flow_id = IntFlowID(flow_id)
     self.db.DeleteWithPrefix(
         "FlowRequests",
-        (int_client_id, int_flow_id),
+        (client_id, flow_id),
         txn_tag="DeleteAllFlowRequestsAndResponses",
     )
 
@@ -1495,64 +1465,51 @@ class FlowsMixin:
       ]
   ]:
     """Reads all requests and responses for a given flow from the database."""
-
-    txn = self.db.Snapshot()
-
-    req_rows = spanner_lib.RowSet()
-    req_rows.AddPrefixRange(
-        spanner_lib.Key(
-            spanner_clients.IntClientID(client_id), IntFlowID(flow_id)
-        )
-    )
-    req_cols = (
+    rowrange = spanner_lib.KeyRange(start_closed=[client_id, flow_id], end_closed=[client_id, flow_id])
+    rows = spanner_lib.KeySet(ranges=[rowrange])
+    req_cols = [
         "Payload",
         "NeedsProcessing",
         "ExpectedResponseCount",
         "CallbackState",
         "NextResponseId",
         "CreationTime",
-    )
+    ]
     requests = []
-    for row in txn.ReadSet(table="FlowRequests", rows=req_rows, cols=req_cols):
+    for row in self.db.ReadSet(table="FlowRequests", rows=rows, cols=req_cols):
       request = flows_pb2.FlowRequest()
-      request.ParseFromString(row["Payload"])
-      request.needs_processing = row["NeedsProcessing"]
-      if row["ExpectedResponseCount"] is not None:
-        request.nr_responses_expected = row["ExpectedResponseCount"]
-      request.callback_state = row["CallbackState"]
-      request.next_response_id = row["NextResponseId"]
+      request.ParseFromString(row[0])
+      request.needs_processing = row[1]
+      if row[2] is not None:
+        request.nr_responses_expected = row[2]
+      request.callback_state = row[3]
+      request.next_response_id = int(row[4])
       request.timestamp = int(
-          rdfvalue.RDFDatetime.FromDatetime(row["CreationTime"])
+          rdfvalue.RDFDatetime.FromDatetime(row[5])
       )
       requests.append(request)
 
-    resp_rows = spanner_lib.RowSet()
-    resp_rows.AddPrefixRange(
-        spanner_lib.Key(
-            spanner_clients.IntClientID(client_id), IntFlowID(flow_id)
-        )
-    )
-    resp_cols = (
+    resp_cols = [
         "Response",
         "Status",
         "Iterator",
         "CreationTime",
-    )
+    ]
     responses = {}
-    for row in txn.ReadSet(
-        table="FlowResponses", rows=resp_rows, cols=resp_cols
+    for row in self.db.ReadSet(
+        table="FlowResponses", rows=rows, cols=resp_cols
     ):
-      if row["Status"] is not None:
+      if row[1] is not None:
         response = flows_pb2.FlowStatus()
-        response.ParseFromString(row["Status"])
-      elif row["Iterator"] is not None:
+        response.ParseFromString(row[1])
+      elif row[2] is not None:
         response = flows_pb2.FlowIterator()
-        response.ParseFromString(row["Iterator"])
+        response.ParseFromString(row[2])
       else:
         response = flows_pb2.FlowResponse()
-        response.ParseFromString(row["Response"])
+        response.ParseFromString(row[0])
       response.timestamp = int(
-          rdfvalue.RDFDatetime.FromDatetime(row["CreationTime"])
+          rdfvalue.RDFDatetime.FromDatetime(row[3])
       )
       responses.setdefault(response.request_id, {})[
           response.response_id
@@ -1576,15 +1533,14 @@ class FlowsMixin:
     def Mutation(mut) -> None:
       for request in requests:
         key = [
-            spanner_clients.IntClientID(request.client_id),
-            IntFlowID(request.flow_id),
+            request.client_id,
+            request.flow_id,
             request.request_id,
         ]
         mut.Delete(table="FlowRequests", key=key)
 
     try:
       self.db.Mutate(Mutation, txn_tag="DeleteFlowRequests")
-    # TODO(b/196379916): Narrow the exception types (cl/450440276).
     except Exception:
       if len(requests) == 1:
         # If there is only one request and we still hit Spanner limits it means
@@ -1636,14 +1592,8 @@ class FlowsMixin:
       ],
   ]:
     """Reads all requests for a flow that can be processed by the worker."""
-
-    txn = self.db.Snapshot()
-    rows = spanner_lib.RowSet()
-    rows.AddPrefixRange(
-        spanner_lib.Key(
-            spanner_clients.IntClientID(client_id), IntFlowID(flow_id)
-        )
-    )
+    rowrange = spanner_lib.KeyRange(start_closed=[client_id, flow_id], end_closed=[client_id, flow_id])
+    rows = spanner_lib.KeySet(ranges=[rowrange])
 
     responses: dict[
         int,
@@ -1655,24 +1605,24 @@ class FlowsMixin:
             ]
         ],
     ] = {}
-    resp_cols = (
+    resp_cols = [
         "Response",
         "Status",
         "Iterator",
         "CreationTime",
-    )
-    for row in txn.ReadSet(table="FlowResponses", rows=rows, cols=resp_cols):
-      if row["Status"]:
+    ]
+    for row in self.db.ReadSet(table="FlowResponses", rows=rows, cols=resp_cols):
+      if row[1]:
         response = flows_pb2.FlowStatus()
-        response.ParseFromString(row["Status"])
-      elif row["Iterator"]:
+        response.ParseFromString(row[1])
+      elif row[2]:
         response = flows_pb2.FlowIterator()
-        response.ParseFromString(row["Iterator"])
+        response.ParseFromString(row[2])
       else:
         response = flows_pb2.FlowResponse()
-        response.ParseFromString(row["Response"])
+        response.ParseFromString(row[0])
       response.timestamp = int(
-          rdfvalue.RDFDatetime.FromDatetime(row["CreationTime"])
+          rdfvalue.RDFDatetime.FromDatetime(row[3])
       )
       responses.setdefault(response.request_id, []).append(response)
 
@@ -1689,24 +1639,24 @@ class FlowsMixin:
             ],
         ],
     ] = {}
-    req_cols = (
+    req_cols = [
         "Payload",
         "NeedsProcessing",
         "ExpectedResponseCount",
         "NextResponseId",
         "CallbackState",
         "CreationTime",
-    )
-    for row in txn.ReadSet(table="FlowRequests", rows=rows, cols=req_cols):
+    ]
+    for row in self.db.ReadSet(table="FlowRequests", rows=rows, cols=req_cols):
       request = flows_pb2.FlowRequest()
-      request.ParseFromString(row["Payload"])
-      request.needs_processing = row["NeedsProcessing"]
-      if row["ExpectedResponseCount"] is not None:
-        request.nr_responses_expected = row["ExpectedResponseCount"]
-      request.callback_state = row["CallbackState"]
-      request.next_response_id = row["NextResponseId"]
+      request.ParseFromString(row[0])
+      request.needs_processing = row[1]
+      if row[2] is not None:
+        request.nr_responses_expected = row[2]
+      request.callback_state = row[4]
+      request.next_response_id = int(row[3])
       request.timestamp = int(
-          rdfvalue.RDFDatetime.FromDatetime(row["CreationTime"])
+          rdfvalue.RDFDatetime.FromDatetime(row[5])
       )
       requests[request.request_id] = (
           request,
@@ -1726,17 +1676,14 @@ class FlowsMixin:
   ) -> None:
     """Updates next response ids of given requests."""
 
-    int_client_id = spanner_clients.IntClientID(client_id)
-    int_flow_id = IntFlowID(flow_id)
-
     with self.db.MutationPool() as mp:
       for request_id, response_id in next_response_id_updates.items():
         with mp.Apply() as mut:
           mut.Update(
               table="FlowRequests",
               row={
-                  "ClientId": int_client_id,
-                  "FlowId": int_flow_id,
+                  "ClientId": client_id,
+                  "FlowId": flow_id,
                   "RequestId": request_id,
                   "NextResponseId": response_id,
               },
@@ -1747,14 +1694,14 @@ class FlowsMixin:
   def WriteFlowLogEntry(self, entry: flows_pb2.FlowLogEntry) -> None:
     """Writes a single flow log entry to the database."""
     row = {
-        "ClientId": spanner_clients.IntClientID(entry.client_id),
-        "FlowId": IntFlowID(entry.flow_id),
+        "ClientId": entry.client_id,
+        "FlowId": entry.flow_id,
         "CreationTime": spanner_lib.COMMIT_TIMESTAMP,
         "Message": entry.message,
     }
 
     if entry.hunt_id:
-      row["HuntId"] = IntHuntID(entry.hunt_id)
+      row["HuntId"] = entry.hunt_id
 
     try:
       self.db.Insert(table="FlowLogEntries", row=row)
@@ -1781,8 +1728,8 @@ class FlowsMixin:
        AND l.FlowId = {flow_id}
     """
     params = {
-        "client_id": spanner_clients.IntClientID(client_id),
-        "flow_id": IntFlowID(flow_id),
+        "client_id": client_id,
+        "flow_id": flow_id,
     }
 
     if with_substring is not None:
@@ -1797,14 +1744,14 @@ class FlowsMixin:
     params["count"] = count
 
     for row in self.db.ParamQuery(query, params):
-      int_hunt_id, creation_time, message = row
+      hunt_id, creation_time, message = row
 
       result = flows_pb2.FlowLogEntry()
       result.client_id = client_id
       result.flow_id = flow_id
 
-      if int_hunt_id is not None:
-        result.hunt_id = db_utils.IntToHuntID(int_hunt_id)
+      if hunt_id is not None:
+        result.hunt_id = hunt_id
 
       result.timestamp = rdfvalue.RDFDatetime.FromDatetime(
           creation_time
@@ -1826,8 +1773,8 @@ class FlowsMixin:
        AND l.FlowId = {flow_id}
     """
     params = {
-        "client_id": spanner_clients.IntClientID(client_id),
-        "flow_id": IntFlowID(flow_id),
+        "client_id": client_id,
+        "flow_id": flow_id,
     }
 
     (count,) = self.db.ParamQuerySingle(query, params)
@@ -1848,18 +1795,20 @@ class FlowsMixin:
       return
 
     def Mutation(mut) -> None:
+      rows = []
+      columns = ["ClientId", "FlowId", "RequestId", "ResponseId",
+                 "LogLevel", "LogTime", "LogMessage", "CreationTime"]
       for response_id, log in logs.items():
-        row = {
-            "ClientId": db_utils.ClientIDToInt(client_id),
-            "FlowId": db_utils.FlowIDToInt(flow_id),
-            "RequestId": request_id,
-            "ResponseId": response_id,
-            "LogLevel": log.level,
-            "LogTime": log.timestamp.ToDatetime(),
-            "LogMessage": log.message,
-            "CreationTime": spanner_lib.COMMIT_TIMESTAMP,
-        }
-        mut.Insert(table="FlowRRGLogs", row=row)
+        rows.append([client_id,
+                     flow_id,
+                     request_id,
+                     response_id,
+                     log.level,
+                     log.timestamp.ToDatetime(),
+                     log.message,
+                     spanner_lib.COMMIT_TIMESTAMP
+        ])
+      mut.insert(table="FlowRRGLogs", columns=columns, values=rows)
 
     try:
       self.db.Mutate(Mutation)
@@ -1891,8 +1840,8 @@ class FlowsMixin:
       {offset}
     """
     params = {
-        "client_id": db_utils.ClientIDToInt(client_id),
-        "flow_id": db_utils.FlowIDToInt(flow_id),
+        "client_id": client_id,
+        "flow_id": flow_id,
         "offset": offset,
         "count": count,
     }
@@ -1923,16 +1872,16 @@ class FlowsMixin:
       entry: An output plugin flow entry to write.
     """
     row = {
-        "ClientId": spanner_clients.IntClientID(entry.client_id),
-        "FlowId": IntFlowID(entry.flow_id),
-        "OutputPluginId": IntOutputPluginID(entry.output_plugin_id),
+        "ClientId": entry.client_id,
+        "FlowId": entry.flow_id,
+        "OutputPluginId": entry.output_plugin_id,
         "CreationTime": spanner_lib.COMMIT_TIMESTAMP,
         "Type": int(entry.log_entry_type),
         "Message": entry.message,
     }
 
     if entry.hunt_id:
-      row["HuntId"] = IntHuntID(entry.hunt_id)
+      row["HuntId"] = entry.hunt_id
 
     try:
       self.db.Insert(table="FlowOutputPluginLogEntries", row=row)
@@ -1965,9 +1914,9 @@ class FlowsMixin:
        AND l.OutputPluginId = {output_plugin_id}
     """
     params = {
-        "client_id": spanner_clients.IntClientID(client_id),
-        "flow_id": IntFlowID(flow_id),
-        "output_plugin_id": IntOutputPluginID(output_plugin_id),
+        "client_id": client_id,
+        "flow_id": flow_id,
+        "output_plugin_id": output_plugin_id,
     }
 
     if with_type is not None:
@@ -1982,15 +1931,15 @@ class FlowsMixin:
     params["count"] = count
 
     for row in self.db.ParamQuery(query, params):
-      int_hunt_id, creation_time, int_type, message = row
+      hunt_id, creation_time, int_type, message = row
 
       result = flows_pb2.FlowOutputPluginLogEntry()
       result.client_id = client_id
       result.flow_id = flow_id
       result.output_plugin_id = output_plugin_id
 
-      if int_hunt_id is not None:
-        result.hunt_id = db_utils.IntToHuntID(int_hunt_id)
+      if hunt_id is not None:
+        result.hunt_id = hunt_id
 
       result.timestamp = rdfvalue.RDFDatetime.FromDatetime(
           creation_time
@@ -2022,9 +1971,9 @@ class FlowsMixin:
        AND l.OutputPluginId = {output_plugin_id}
     """
     params = {
-        "client_id": spanner_clients.IntClientID(client_id),
-        "flow_id": IntFlowID(flow_id),
-        "output_plugin_id": IntOutputPluginID(output_plugin_id),
+        "client_id": client_id,
+        "flow_id": flow_id,
+        "output_plugin_id": output_plugin_id,
     }
 
     if with_type is not None:
@@ -2042,9 +1991,9 @@ class FlowsMixin:
   ) -> None:
     """Inserts or updates the ScheduledFlow in the database."""
     row = {
-        "ClientID": spanner_clients.IntClientID(scheduled_flow.client_id),
+        "ClientId": scheduled_flow.client_id,
         "Creator": scheduled_flow.creator,
-        "ScheduledFlowId": IntFlowID(scheduled_flow.scheduled_flow_id),
+        "ScheduledFlowId": scheduled_flow.scheduled_flow_id,
         "FlowName": scheduled_flow.flow_name,
         "FlowArgs": scheduled_flow.flow_args,
         "RunnerArgs": scheduled_flow.runner_args,
@@ -2056,8 +2005,8 @@ class FlowsMixin:
 
     try:
       self.db.InsertOrUpdate(table="ScheduledFlows", row=row)
-    except NotFound as error:
-      if "Parent row is missing: Clients" in str(error):
+    except Exception as error:
+      if "Parent row for row [" in str(error):
         raise db.UnknownClientError(scheduled_flow.client_id) from error
       elif "fk_creator_users_username" in str(error):
         raise db.UnknownGRRUserError(scheduled_flow.creator) from error
@@ -2073,16 +2022,11 @@ class FlowsMixin:
       scheduled_flow_id: str,
   ) -> None:
     """Deletes the ScheduledFlow from the database."""
-
-    key = (
-        spanner_clients.IntClientID(client_id),
-        creator,
-        IntFlowID(scheduled_flow_id),
-    )
+    keyset = spanner_lib.KeySet(keys=[[client_id, creator, scheduled_flow_id]])
 
     def Transaction(txn) -> None:
       try:
-        txn.Read(table="ScheduledFlows", cols=["ScheduledFlowId"], key=key)
+        txn.read(table="ScheduledFlows", columns=["ScheduledFlowId"], keyset=keyset).one()
       except NotFound as e:
         raise db.UnknownScheduledFlowError(
             client_id=client_id,
@@ -2090,8 +2034,7 @@ class FlowsMixin:
             scheduled_flow_id=scheduled_flow_id,
         ) from e
 
-      with txn.Mutate() as mut:
-        mut.Delete(table="ScheduledFlows", key=key)
+      txn.delete(table="ScheduledFlows", keyset=keyset)
 
     self.db.Transact(Transaction)
 
@@ -2103,12 +2046,10 @@ class FlowsMixin:
       creator: str,
   ) -> Sequence[flows_pb2.ScheduledFlow]:
     """Lists all ScheduledFlows for the client and creator."""
-    rows = spanner_lib.RowSet()
-    rows.AddPrefixRange(
-        spanner_lib.Key(spanner_clients.IntClientID(client_id), creator)
-    )
+    range = spanner_lib.KeyRange(start_closed=[client_id, creator], end_closed=[client_id, creator])
+    rows = spanner_lib.KeySet(ranges=[range])
 
-    cols = (
+    cols = [
         "ClientId",
         "Creator",
         "ScheduledFlowId",
@@ -2117,21 +2058,21 @@ class FlowsMixin:
         "RunnerArgs",
         "CreationTime",
         "Error",
-    )
+    ]
     results = []
 
     for row in self.db.ReadSet("ScheduledFlows", rows, cols):
       sf = flows_pb2.ScheduledFlow()
-      sf.client_id = db_utils.IntToClientID(row["ClientId"])
-      sf.creator = row["Creator"]
-      sf.scheduled_flow_id = db_utils.IntToFlowID(row["ScheduledFlowId"])
-      sf.flow_name = row["FlowName"]
-      sf.flow_args.ParseFromString(row["FlowArgs"])
-      sf.runner_args.ParseFromString(row["RunnerArgs"])
+      sf.client_id = row[0]
+      sf.creator = row[1]
+      sf.scheduled_flow_id = row[2]
+      sf.flow_name = row[3]
+      sf.flow_args.ParseFromString(row[4])
+      sf.runner_args.ParseFromString(row[5])
       sf.create_time = int(
-          rdfvalue.RDFDatetime.FromDatetime(row["CreationTime"])
+          rdfvalue.RDFDatetime.FromDatetime(row[6])
       )
-      sf.error = row["Error"]
+      sf.error = row[7]
 
       results.append(sf)
 
@@ -2161,9 +2102,9 @@ class FlowsMixin:
     for result in self.db.ReadMessageHandlerRequests():
       req = objects_pb2.MessageHandlerRequest()
       req.ParseFromString(result["payload"])
-      req.timestamp = rdfvalue.RDFDatetime.FromDatetime(
-          result["publish_time"]
-      ).AsMicrosecondsSinceEpoch()
+      req.creation_time = int(
+          rdfvalue.RDFDatetime.FromDatetime(result["publish_time"])
+      )
       req.ack_id = result["ack_id"]
       results.append(req)
 
@@ -2295,8 +2236,8 @@ class FlowsMixin:
       self, txn, hunt_id: str
   ) -> Optional[int]:
     try:
-      row = txn.Read(table="Hunts", key=(IntHuntID(hunt_id),), cols=("State",))
-      return row["State"]
+      row = txn.read(table="Hunts", keyset=spanner_lib.KeySet[[hunt_id]], columns=["State",]).one()
+      return row[0]
     except NotFound:
       return None
 
@@ -2309,16 +2250,14 @@ class FlowsMixin:
       processing_time: rdfvalue.Duration,
   ) -> flows_pb2.Flow:
     """Marks a flow as being processed on this worker and returns it."""
-    int_client_id = spanner_clients.IntClientID(client_id)
-    int_flow_id = IntFlowID(flow_id)
 
     def Txn(txn) -> flows_pb2.Flow:
       try:
-        row = txn.Read(
+        row = txn.read(
             table="Flows",
-            key=(int_client_id, int_flow_id),
-            cols=_READ_FLOW_OBJECT_COLS,
-        )
+            keyset=spanner_lib.KeySet[[client_id, flow_id]],
+            columns=_READ_FLOW_OBJECT_COLS,
+        ).one()
       except NotFound as error:
         raise db.UnknownFlowError(client_id, flow_id, cause=error)
 
@@ -2357,8 +2296,8 @@ class FlowsMixin:
       txn.Update(
           table="Flows",
           row={
-              "ClientId": int_client_id,
-              "FlowId": int_flow_id,
+              "ClientId": client_id,
+              "FlowId": flow_id,
               "ProcessingWorker": flow.processing_on,
               "ProcessingEndTime": (
                   rdfvalue.RDFDatetime.FromMicrosecondsSinceEpoch(
@@ -2383,18 +2322,16 @@ class FlowsMixin:
   @db_utils.CallAccounted
   def ReleaseProcessedFlow(self, flow_obj: flows_pb2.Flow) -> bool:
     """Releases a flow that the worker was processing to the database."""
-    int_client_id = spanner_clients.IntClientID(flow_obj.client_id)
-    int_flow_id = IntFlowID(flow_obj.flow_id)
 
     def Txn(txn) -> bool:
       try:
-        row = txn.Read(
+        row = txn.read(
             table="FlowRequests",
-            key=(int_client_id, int_flow_id, flow_obj.next_request_to_process),
-            cols=("NeedsProcessing", "StartTime"),
-        )
-        if row["NeedsProcessing"]:
-          start_time = row["StartTime"]
+            keyset=spanner_lib.KeySet[[flow_obj.client_id, flow_obj.flow_id, flow_obj.next_request_to_process]],
+            columns=["NeedsProcessing", "StartTime"],
+        ).one()
+        if row[0]:
+          start_time = row[1]
           if start_time is None:
             return False
           elif (
@@ -2404,67 +2341,22 @@ class FlowsMixin:
             return False
       except NotFound:
         pass
-      txn.Update(
+      txn.update(
           table="Flows",
-          row={
-              "ClientId": int_client_id,
-              "FlowId": int_flow_id,
-              "Flow": flow_obj,
-              "State": int(flow_obj.flow_state),
-              "UserCpuTimeUsed": float(flow_obj.cpu_time_used.user_cpu_time),
-              "SystemCpuTimeUsed": float(
-                  flow_obj.cpu_time_used.system_cpu_time
-              ),
-              "NetworkBytesSent": int(
-                  flow_obj.network_bytes_sent
-              ),
-              "ProcessingWorker": None,
-              "ProcessingStartTime": None,
-              "ProcessingEndTime": None,
-              "NextRequesttoProcess": int(
-                  flow_obj.next_request_to_process
-              ),
-              "UpdateTime": spanner_lib.COMMIT_TIMESTAMP,
-              "ReplyCount": flow_obj.num_replies_sent,
-          },
+          columns=["ClientId", "FlowId", "Flow", "State", "UserCpuTimeUsed",
+                   "SystemCpuTimeUsed", "NetworkBytesSent", "ProcessingWorker",
+                   "ProcessingStartTime", "ProcessingEndTime", "NextRequesttoProcess",
+                   "UpdateTime", "ReplyCount"],
+          values=[[flow_obj.client_id, flow_obj.flow_id,flow_obj,
+                   int(flow_obj.flow_state), float(flow_obj.cpu_time_used.user_cpu_time),
+                   float(flow_obj.cpu_time_used.system_cpu_time),
+                   int(flow_obj.network_bytes_sent), None, None, None,
+                   flow_obj.next_request_to_process,
+                   spanner_lib.COMMIT_TIMESTAMP,
+                   flow_obj.num_replies_sent,
+          ]],
       )
-
       return True
 
     return self.db.Transact(Txn).value
 
-
-def IntFlowID(flow_id: str) -> int:
-  """Converts a flow identifier to its integer representation.
-
-  Args:
-    flow_id: A flow identifier to convert.
-
-  Returns:
-    An integer representation of the given flow identifier.
-  """
-  return db_utils.FlowIDToInt(flow_id)
-
-
-def IntHuntID(hunt_id: str) -> int:
-  """Converts a hunt identifier to its integer representation.
-
-  Args:
-    hunt_id: A hunt identifier to convert.
-
-  Returns:
-    An integer representation of the given hunt identifier.
-  """
-  return db_utils.HuntIDToInt(hunt_id)
-
-
-def IntOutputPluginID(output_plugin_id: str) -> int:
-  """Converts an output plugin identifier to its integer representation.
-
-  Args:
-    output_plugin_id: An output plugin identifier to convert.
-
-  Returns:
-    An integer representation of the given output plugin identifier.
-  """
-  return db_utils.OutputPluginIDToInt(output_plugin_id)
