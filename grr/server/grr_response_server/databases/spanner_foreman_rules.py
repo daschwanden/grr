@@ -19,7 +19,7 @@ class ForemanRulesMixin:
   def WriteForemanRule(self, rule: jobs_pb2.ForemanCondition) -> None:
     """Writes a foreman rule to the database."""
     row = {
-        "HuntId": rule.hunt_id_int,
+        "HuntId": rule.hunt_id,
         "ExpirationTime": (
             rdfvalue.RDFDatetime()
             .FromMicrosecondsSinceEpoch(rule.expiration_time)

@@ -71,6 +71,7 @@ class SpannerDatabaseHandlerTest(spanner_test_lib.TestCase):
 
     self.assertCountEqual(requests[2:4], read)
 
+  def testMessageHandlerLeaseManagement(self):
     ########################
     # Lease Management tests
     ########################

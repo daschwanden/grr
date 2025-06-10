@@ -4,7 +4,6 @@
 import dataclasses
 import datetime
 import logging
-from time import sleep
 from typing import Any, Callable, Collection, Dict, Iterable, List, Mapping, Optional, Sequence, Set, Tuple, Union
 
 from google.api_core.exceptions import AlreadyExists, NotFound
@@ -1676,18 +1675,18 @@ class FlowsMixin:
   ) -> None:
     """Updates next response ids of given requests."""
 
-    with self.db.MutationPool() as mp:
+    def Txn(txn) -> None:
+      rows = []
+      columns = ["ClientId", "FlowId", "RequestId", "NextResponseId"]
       for request_id, response_id in next_response_id_updates.items():
-        with mp.Apply() as mut:
-          mut.Update(
-              table="FlowRequests",
-              row={
-                  "ClientId": client_id,
-                  "FlowId": flow_id,
-                  "RequestId": request_id,
-                  "NextResponseId": response_id,
-              },
-          )
+        rows.append([client_id, flow_id, request_id, response_id])
+      txn.update(
+          table="FlowRequests",
+          columns=columns,
+          values=rows,
+      )
+
+    self.db.Transact(Txn)
 
   @db_utils.CallLogged
   @db_utils.CallAccounted
@@ -2102,7 +2101,7 @@ class FlowsMixin:
     for result in self.db.ReadMessageHandlerRequests():
       req = objects_pb2.MessageHandlerRequest()
       req.ParseFromString(result["payload"])
-      req.creation_time = int(
+      req.timestamp = int(
           rdfvalue.RDFDatetime.FromDatetime(result["publish_time"])
       )
       req.ack_id = result["ack_id"]
@@ -2236,7 +2235,7 @@ class FlowsMixin:
       self, txn, hunt_id: str
   ) -> Optional[int]:
     try:
-      row = txn.read(table="Hunts", keyset=spanner_lib.KeySet[[hunt_id]], columns=["State",]).one()
+      row = txn.read(table="Hunts", keyset=spanner_lib.KeySet(keys=[[hunt_id]]), columns=["State",]).one()
       return row[0]
     except NotFound:
       return None
@@ -2255,7 +2254,7 @@ class FlowsMixin:
       try:
         row = txn.read(
             table="Flows",
-            keyset=spanner_lib.KeySet[[client_id, flow_id]],
+            keyset=spanner_lib.KeySet(keys=[[client_id, flow_id]]),
             columns=_READ_FLOW_OBJECT_COLS,
         ).one()
       except NotFound as error:
@@ -2293,28 +2292,23 @@ class FlowsMixin:
       flow.processing_on = utils.ProcessIdString()
       flow.processing_deadline = int(now + processing_time)
 
-      txn.Update(
+      txn.update(
           table="Flows",
-          row={
-              "ClientId": client_id,
-              "FlowId": flow_id,
-              "ProcessingWorker": flow.processing_on,
-              "ProcessingEndTime": (
-                  rdfvalue.RDFDatetime.FromMicrosecondsSinceEpoch(
+          columns = ["ClientId", "FlowId", "ProcessingWorker",
+                     "ProcessingEndTime","ProcessingStartTime"],
+          values=[[client_id, flow_id, flow.processing_on,
+                   rdfvalue.RDFDatetime.FromMicrosecondsSinceEpoch(
                       flow.processing_deadline
-                  ).AsDatetime()
-              ),
-              "ProcessingStartTime": spanner_lib.COMMIT_TIMESTAMP,
-          },
+                   ).AsDatetime(),
+                   spanner_lib.COMMIT_TIMESTAMP,
+          ]]
       )
 
       return flow
 
-    result = self.db.Transact(Txn)
-
-    leased_flow = result.value
+    leased_flow, commit_timestamp = self.db.Transact(Txn)
     leased_flow.processing_since = int(
-        rdfvalue.RDFDatetime.FromDatetime(result.commit_time)
+        rdfvalue.RDFDatetime.FromDatetime(commit_timestamp)
     )
     return leased_flow
 
@@ -2327,7 +2321,7 @@ class FlowsMixin:
       try:
         row = txn.read(
             table="FlowRequests",
-            keyset=spanner_lib.KeySet[[flow_obj.client_id, flow_obj.flow_id, flow_obj.next_request_to_process]],
+            keyset=spanner_lib.KeySet(keys=[[flow_obj.client_id, flow_obj.flow_id, flow_obj.next_request_to_process]]),
             columns=["NeedsProcessing", "StartTime"],
         ).one()
         if row[0]:
@@ -2358,5 +2352,5 @@ class FlowsMixin:
       )
       return True
 
-    return self.db.Transact(Txn).value
+    return self.db.Transact(Txn)
 

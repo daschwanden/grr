@@ -176,7 +176,7 @@ class Database:
       txn_tag: Transaction tag to apply.
 
     Returns:
-      The result the transaction function returned.
+      The result of the transaction function executed.
     """
     return self._pyspanner.run_in_transaction(func)
 
