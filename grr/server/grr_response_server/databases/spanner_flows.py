@@ -313,8 +313,8 @@ class FlowsMixin:
         self.db.Insert(table="Flows", row=row, txn_tag="WriteFlowObject_I")
     except AlreadyExists as error:
       raise db.FlowExistsError(client_id, flow_id) from error
-    except NotFound as error:
-      if "Parent row is missing: Clients" in str(error):
+    except Exception as error:
+      if "Parent row for row [" in str(error):
         raise db.UnknownClientError(client_id)
       else:
         raise
@@ -738,6 +738,7 @@ class FlowsMixin:
     """Writes a list of FlowProcessingRequests to the queue."""
     flowProcessingRequests = []
     for request in requests:
+      request.creation_time=self.db.Now().AsMicrosecondsSinceEpoch()
       flowProcessingRequests.append(request.SerializeToString())
 
     self.db.PublishFlowProcessingRequests(flowProcessingRequests)
@@ -777,28 +778,17 @@ class FlowsMixin:
       self, requests: Iterable[flows_pb2.FlowProcessingRequest]
   ) -> None:
     """Acknowledges and deletes flow processing requests."""
-
-    def Mutation(mut) -> None:
-      for r in requests:
-        key = (
-            r.client_id,
-            r.flow_id,
-            rdfvalue.RDFDatetime.FromMicrosecondsSinceEpoch(
-                r.creation_time
-            ).AsDatetime(),
-        )
-        mut.Ack("FlowProcessingRequestsQueue", key)
-
-    self.db.BufferedMutate(Mutation, txn_tag="AckFlowProcessingRequests")
+    ack_ids = []
+    for r in requests:
+      ack_ids.append(r.ack_id)
+    
+    self.db.AckFlowProcessingRequests(ack_ids)
 
   @db_utils.CallLogged
   @db_utils.CallAccounted
   def DeleteAllFlowProcessingRequests(self) -> None:
     """Deletes all flow processing requests from the database."""
-    query = """
-    DELETE FROM FlowProcessingRequestsQueue WHERE true
-    """
-    self.db.ParamExecute(query, {}, txn_tag="DeleteAllFlowProcessingRequests")
+    self.db.DeleteAllFlowProcessingRequests()
 
   def RegisterFlowProcessingHandler(
       self, handler: Callable[[flows_pb2.FlowProcessingRequest], None]
@@ -810,14 +800,26 @@ class FlowsMixin:
       try:
         req = flows_pb2.FlowProcessingRequest()
         req.ParseFromString(payload)
-        req.ack_id = ack_id
-        req.creation_time = int(
-            rdfvalue.RDFDatetime.FromDatetime(publish_time)
-        )
-        handler(req)
+        date_time_now = rdfvalue.RDFDatetime.Now()
+        epoch_now = date_time_now.AsMicrosecondsSinceEpoch()
+        epoch_in_ten = epoch_now + 10 * 1000000
+        if req.delivery_time > epoch_now:
+          ack_ids = []
+          ack_ids.append(ack_id)
+          # figure out when we reach the delivery time, and push it out (max 10 mins allowed by PubSub)
+          ack_deadline = req.delivery_time if req.delivery_time <= epoch_in_ten else epoch_in_ten
+          # PubSub wants the deadline in seconds from now
+          ack_deadline = int((ack_deadline - epoch_now)/1000000) 
+          self.db.LeaseFlowProcessingRequests(ack_ids, ack_deadline)
+        else:
+          #req.creation_time = int(
+          #  rdfvalue.RDFDatetime.FromDatetime(publish_time)
+          #)
+          req.ack_id = ack_id
+          handler(req)
       except Exception as e:  # pylint: disable=broad-except
         logging.exception(
-            "Exception raised during MessageHandlerRequest processing: %s", e
+            "Exception raised during FlowProcessingRequest processing: %s", e
         )
 
     receiver = self.db.NewRequestQueue(
@@ -910,7 +912,7 @@ class FlowsMixin:
     try:
       self.db.Transact(Txn, txn_tag="WriteFlowRequests")
     except NotFound as error:
-      if "Parent row is missing: Flows" in str(error):
+      if "Parent row for row [" in str(error):
         raise db.AtLeastOneUnknownFlowError(flow_keys, cause=error)
       else:
         raise
@@ -1441,7 +1443,6 @@ class FlowsMixin:
     self.db.DeleteWithPrefix(
         "FlowRequests",
         (client_id, flow_id),
-        txn_tag="DeleteAllFlowRequestsAndResponses",
     )
 
   @db_utils.CallLogged
@@ -2115,21 +2116,11 @@ class FlowsMixin:
       requests: Iterable[objects_pb2.MessageHandlerRequest],
   ) -> None:
     """Deletes given requests within a given transaction."""
-    req_rows = spanner_lib.RowSet()
+    ack_ids = []
     for r in requests:
-      req_rows.AddPrefixRange(spanner_lib.Key(r.handler_name, r.request_id))
-
-    to_delete = []
-    req_cols = ("HandlerName", "RequestId", "CreationTime")
-    for row in txn.ReadSet("MessageHandlerRequestsQueue", req_rows, req_cols):
-      handler_name: str = row["HandlerName"]
-      request_id: int = row["RequestId"]
-      creation_time: datetime.datetime = row["CreationTime"]
-      to_delete.append((handler_name, request_id, creation_time))
-
-    with txn.BufferedMutate() as mut:
-      for td_key in to_delete:
-        mut.Ack("MessageHandlerRequestsQueue", td_key)
+      ack_ids.append(r.ack_id)
+    
+    self.db.AckMessageHandlerRequests(ack_ids)
 
   @db_utils.CallLogged
   @db_utils.CallAccounted
@@ -2137,7 +2128,6 @@ class FlowsMixin:
       self, requests: Iterable[objects_pb2.MessageHandlerRequest]
   ) -> None:
     """Deletes a list of message handler requests from the database."""
-
     ack_ids = []
     for request in requests:
       ack_ids.append(request.ack_id)
@@ -2306,10 +2296,10 @@ class FlowsMixin:
 
       return flow
 
-    leased_flow, commit_timestamp = self.db.Transact(Txn)
-    leased_flow.processing_since = int(
-        rdfvalue.RDFDatetime.FromDatetime(commit_timestamp)
-    )
+    leased_flow = self.db.Transact(Txn)
+    #leased_flow.processing_since = int(
+    #    rdfvalue.RDFDatetime.FromDatetime(commit_stats.commit_timestamp)
+    #)
     return leased_flow
 
   @db_utils.CallLogged
@@ -2353,4 +2343,3 @@ class FlowsMixin:
       return True
 
     return self.db.Transact(Txn)
-

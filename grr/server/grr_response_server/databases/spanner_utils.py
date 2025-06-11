@@ -3,6 +3,7 @@
 import contextlib
 import datetime
 import decimal
+import pytz
 import re
 import time
 
@@ -30,6 +31,7 @@ from google.cloud.spanner_v1 import Mutation, param_types
 
 from google.rpc.code_pb2 import OK
 
+from grr_response_core.lib import rdfvalue
 from grr_response_core.lib.util import collection
 from grr_response_core.lib.util import iterator
 
@@ -105,6 +107,24 @@ class Database:
     self.message_handler_sub_path = self.subscriber.subscription_path(project_id, msg_handler_sub_id)
     self.message_handler_top_path = self.publisher.topic_path(project_id, msg_handler_top_id)
 
+  def Now(self) -> rdfvalue.RDFDatetime:
+    """Retrieves current time as reported by the database."""
+    try:
+        with self._pyspanner.snapshot() as snapshot:
+            query = "SELECT CURRENT_TIMESTAMP()"
+            results = snapshot.execute_sql(query)
+            # Get the first (and only) row
+            # and the first (and only) column from that row.
+            timestamp = next(results)[0]
+            return rdfvalue.RDFDatetime.FromDatetime(timestamp)
+    except Exception as e:
+        print(f"Error executing query: {e}")
+        return None
+
+  def MinTimestamp(self) -> rdfvalue.RDFDatetime:
+    """Returns minimal timestamp allowed by the DB."""
+    return rdfvalue.RDFDatetime.FromSecondsSinceEpoch(0)
+  
   def _parametrize(self, query: str, names: Iterable[str]) -> str:
     match = self._PYSPANNER_PARAM_REGEX.search(query)
     if match is not None:
@@ -167,6 +187,7 @@ class Database:
       self,
       func: Callable[["Transaction"], _T],
       txn_tag: Optional[str] = None,
+      log_commit_stats: Optional[bool] = False
   ) -> List[Any]:
 
     """Execute the given callback function in a Spanner transaction.
@@ -545,12 +566,27 @@ class Database:
     self.AckRequests(ack_ids, self.message_handler_sub_path)
 
   def AckFlowProcessingRequests(self, ack_ids: [str]) -> None:
-    self.AckRequests(ack_ids, self.flow_proccessing_sub_path)
+    self.AckRequests(ack_ids, self.flow_processing_sub_path)
+  
+  def DeleteAllMessageHandlerRequests(self) -> None:
+    self.DeleteAllRequests(self.message_handler_sub_path)
 
+  def DeleteAllFlowProcessingRequests(self) -> None:
+    self.DeleteAllRequests(self.flow_processing_sub_path)
+  
   def LeaseMessageHandlerRequests(self, ack_ids: [str], ack_deadline: int) -> None:
     self.subscriber.modify_ack_deadline(
       request={
         "subscription": self.message_handler_sub_path,
+        "ack_ids": ack_ids,
+        "ack_deadline_seconds": ack_deadline,
+      }
+    )
+
+  def LeaseFlowProcessingRequests(self, ack_ids: [str], ack_deadline: int) -> None:
+    self.subscriber.modify_ack_deadline(
+      request={
+        "subscription": self.flow_processing_sub_path,
         "ack_ids": ack_ids,
         "ack_deadline_seconds": ack_deadline,
       }
@@ -565,16 +601,26 @@ class Database:
       request={"subscription": sub_path, "ack_ids": ack_ids}
     )
 
+  def DeleteAllRequests(self, sub_path: str) -> None:
+    client = pubsub_v1.SubscriberClient()
+    # Initialize request argument(s)
+    request = {
+        "subscription": sub_path,
+        "time": datetime.datetime.now(pytz.utc) + datetime.timedelta(days=30) 
+    }
+    # Make the request
+    response = client.seek(request=request)
+
   def ReadRequests(self, sub_path: str):
     # Make the request
 
     start_time = time.time()
     results = {}
-    while time.time() - start_time < 10:
+    while time.time() - start_time < 2:
       time.sleep(0.1)
 
       response = self.subscriber.pull(
-        request={
+        request = {
           "subscription": sub_path,
           "max_messages": 10000,
         },
