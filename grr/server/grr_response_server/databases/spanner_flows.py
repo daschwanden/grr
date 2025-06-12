@@ -898,7 +898,7 @@ class FlowsMixin:
 
           candidate_requests = needs_processing.get((client_id, flow_id), [])
           for r in candidate_requests:
-            if row[2] == r.request_id or r.start_time:
+            if int(row[2]) == r.request_id or r.start_time:
               req = flows_pb2.FlowProcessingRequest(
                   client_id=client_id, flow_id=flow_id
               )
@@ -1229,7 +1229,7 @@ class FlowsMixin:
       req_key = _RequestKey(
           client_id,
           flow_id,
-          request_id,
+          int(request_id),
       )
       result[req_key] = count
 
@@ -1304,7 +1304,7 @@ class FlowsMixin:
                         columns=req_cols):
       client_id: str = row[0]
       flow_id: str = row[1]
-      request_id: str = row[2]
+      request_id: int = row[2]
       np: bool = row[3]
       start_time: Optional[rdfvalue.RDFDatetime] = None
       if row[4] is not None:
@@ -1337,7 +1337,7 @@ class FlowsMixin:
     for req_key in requests:
       rows.append([req_key.client_id,
                    req_key.flow_id,
-                   req_key.request_id,
+                   str(req_key.request_id),
                    True,
       ])
     txn.update(table="FlowRequests", columns=columns, values=rows)
@@ -1396,7 +1396,7 @@ class FlowsMixin:
           ],
       ],
   ) -> None:
-    """Writes Flow ressages and updates corresponding requests."""
+    """Writes Flow messages and updates corresponding requests."""
     responses_expected_by_request = {}
     callback_state_by_request = {}
     for batch in collection.Batch(responses, self._write_rows_batch_size):
@@ -1535,7 +1535,7 @@ class FlowsMixin:
         key = [
             request.client_id,
             request.flow_id,
-            request.request_id,
+            str(request.request_id),
         ]
         mut.Delete(table="FlowRequests", key=key)
 
@@ -1680,7 +1680,7 @@ class FlowsMixin:
       rows = []
       columns = ["ClientId", "FlowId", "RequestId", "NextResponseId"]
       for request_id, response_id in next_response_id_updates.items():
-        rows.append([client_id, flow_id, request_id, response_id])
+        rows.append([client_id, flow_id, str(request_id), str(response_id)])
       txn.update(
           table="FlowRequests",
           columns=columns,

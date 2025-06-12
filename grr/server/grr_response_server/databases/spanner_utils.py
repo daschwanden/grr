@@ -109,17 +109,13 @@ class Database:
 
   def Now(self) -> rdfvalue.RDFDatetime:
     """Retrieves current time as reported by the database."""
-    try:
-        with self._pyspanner.snapshot() as snapshot:
-            query = "SELECT CURRENT_TIMESTAMP()"
-            results = snapshot.execute_sql(query)
-            # Get the first (and only) row
-            # and the first (and only) column from that row.
-            timestamp = next(results)[0]
-            return rdfvalue.RDFDatetime.FromDatetime(timestamp)
-    except Exception as e:
-        print(f"Error executing query: {e}")
-        return None
+    with self._pyspanner.snapshot() as snapshot:
+      timestamp = None
+      query = "SELECT CURRENT_TIMESTAMP() AS now"
+      results = snapshot.execute_sql(query)
+      for row in results:
+        timestamp = row[0]
+      return rdfvalue.RDFDatetime.FromDatetime(timestamp)
 
   def MinTimestamp(self) -> rdfvalue.RDFDatetime:
     """Returns minimal timestamp allowed by the DB."""
@@ -187,7 +183,6 @@ class Database:
       self,
       func: Callable[["Transaction"], _T],
       txn_tag: Optional[str] = None,
-      log_commit_stats: Optional[bool] = False
   ) -> List[Any]:
 
     """Execute the given callback function in a Spanner transaction.

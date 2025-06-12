@@ -1,7 +1,7 @@
 from absl.testing import absltest
 
 from grr_response_server.databases import db_cronjob_test
-from grr_response_server.databases.local.spanner import spanner_test_lib
+from grr_response_server.databases import spanner_test_lib
 
 
 def setUpModule() -> None:

@@ -3,8 +3,8 @@ from collections.abc import Sequence
 from absl.testing import absltest
 
 from grr_response_server.databases import db_paths_test
-from grr_response_server.databases.local.spanner import paths as spanner_paths
-from grr_response_server.databases.local.spanner import spanner_test_lib
+from grr_response_server.databases import spanner_paths
+from grr_response_server.databases import spanner_test_lib
 
 
 def setUpModule() -> None:
