@@ -1305,7 +1305,7 @@ class FlowsMixin:
                         columns=req_cols):
       client_id: str = row[0]
       flow_id: str = row[1]
-      request_id: int = row[2]
+      request_id: int = int(row[2])
       np: bool = row[3]
       start_time: Optional[rdfvalue.RDFDatetime] = None
       if row[4] is not None:
