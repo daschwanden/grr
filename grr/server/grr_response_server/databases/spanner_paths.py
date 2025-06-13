@@ -1,7 +1,10 @@
 #!/usr/bin/env python
 """A module with path methods of the Spanner database implementation."""
-
+import base64
 from typing import Collection, Dict, Iterable, Optional, Sequence
+
+from google.api_core.exceptions import NotFound
+from google.cloud import spanner as spanner_lib
 
 from grr_response_core.lib import rdfvalue
 from grr_response_core.lib.util import iterator
@@ -17,8 +20,6 @@ class PathsMixin:
 
   db: spanner_utils.Database
 
-  # TODO(b/196379916): Implement path methods.
-
   @db_utils.CallLogged
   @db_utils.CallAccounted
   def WritePathInfos(
@@ -27,85 +28,73 @@ class PathsMixin:
       path_infos: Iterable[objects_pb2.PathInfo],
   ) -> None:
     """Writes a collection of path records for a client."""
-    int_client_id = client_id
-
     # Special case for empty list of paths because Spanner does not like empty
     # mutations. We still have to validate the client id.
     if not path_infos:
       try:
-        self.db.Read(table="Clients", key=[int_client_id], cols=())
-      except spanner_errors.RowNotFoundError as error:
+        self.db.Read(table="Clients", key=[client_id], cols=(["ClientId"]))
+      except NotFound as error:
         raise abstract_db.UnknownClientError(client_id) from error
-
       return
 
-    def Mutation(mut: spanner_utils.Mutation) -> None:
+    def Mutation(mut) -> None:
       ancestors = set()
-
+      file_hash_columns = ["ClientId", "Type", "Path", "CreationTime", "FileHash"]
+      file_stat_columns = ["ClientId", "Type", "Path", "CreationTime", "Stat"]
       for path_info in path_infos:
+        path_columns = ["ClientId", "Type", "Path", "CreationTime", "IsDir", "Depth"]
         int_path_type = int(path_info.path_type)
         path = EncodePathComponents(path_info.components)
 
-        row = {
-            "ClientId": int_client_id,
-            "Type": int_path_type,
-            "Path": path,
-            "CreationTime": spanner_lib.COMMIT_TIMESTAMP,
-            "IsDir": path_info.directory,
-            "Depth": len(path_info.components),
-        }
+        path_row = [client_id, int_path_type, path,
+                    spanner_lib.COMMIT_TIMESTAMP,
+                    path_info.directory,
+                    len(path_info.components)
+        ]
 
         if path_info.HasField("stat_entry"):
-          row["LastFileStatTime"] = spanner_lib.COMMIT_TIMESTAMP
+          path_columns.append("LastFileStatTime")
+          path_row.append(spanner_lib.COMMIT_TIMESTAMP)
 
-          file_stat_row = {
-              "ClientId": int_client_id,
-              "Type": int_path_type,
-              "Path": path,
-              "CreationTime": spanner_lib.COMMIT_TIMESTAMP,
-              "Stat": path_info.stat_entry,
-          }
+          file_stat_row = [client_id, int_path_type, path,
+                           spanner_lib.COMMIT_TIMESTAMP,
+                           path_info.stat_entry
+          ]
         else:
           file_stat_row = None
 
         if path_info.HasField("hash_entry"):
-          row["LastFileHashTime"] = spanner_lib.CommitTimestamp()
+          path_columns.append("LastFileHashTime")
+          path_row.append(spanner_lib.COMMIT_TIMESTAMP)
 
-          file_hash_row = {
-              "ClientId": int_client_id,
-              "Type": int_path_type,
-              "Path": path,
-              "CreationTime": spanner_lib.CommitTimestamp(),
-              "Hash": path_info.hash_entry,
-          }
+          file_hash_row = [client_id, int_path_type, path,
+                           spanner_lib.COMMIT_TIMESTAMP,
+                          path_info.hash_entry,
+          ]
         else:
           file_hash_row = None
 
-        mut.InsertOrUpdate(table="Paths", row=row)
+        mut.insert_or_update(table="Paths", columns=path_columns, values=[path_row])
         if file_stat_row is not None:
-          mut.Insert(table="PathFileStats", row=file_stat_row)
+          mut.insert(table="PathFileStats", columns=file_stat_columns, values=[file_stat_row])
         if file_hash_row is not None:
-          mut.Insert(table="PathFileHashes", row=file_hash_row)
+          mut.insert(table="PathFileHashes", columns=file_hash_columns, values=[file_hash_row])
 
         for path_info_ancestor in models_paths.GetAncestorPathInfos(path_info):
           components = tuple(path_info_ancestor.components)
           ancestors.add((path_info.path_type, components))
 
+      path_columns = ["ClientId", "Type", "Path", "CreationTime", "IsDir", "Depth"]
       for path_type, components in ancestors:
-        row = {
-            "ClientId": int_client_id,
-            "Type": int(path_type),
-            "Path": EncodePathComponents(components),
-            "CreationTime": spanner_lib.CommitTimestamp(),
-            "IsDir": True,
-            "Depth": len(components),
-        }
-        mut.InsertOrUpdate(table="Paths", row=row)
+        path_row = [client_id, int(path_type), EncodePathComponents(components),
+                    spanner_lib.COMMIT_TIMESTAMP, True, len(components),
+        ]
+        mut.insert_or_update(table="Paths", columns=path_columns, values=[path_row])
 
     try:
       self.db.Mutate(Mutation, txn_tag="WritePathInfos")
     except NotFound as error:
-      if "Parent row is missing: Clients" in str(error):
+      if "Parent row for row [" in str(error):
         raise abstract_db.UnknownClientError(client_id) from error
       else:
         raise
@@ -128,7 +117,7 @@ class PathsMixin:
     query = """
     SELECT p.Path, p.CreationTime, p.IsDir,
            ps.CreationTime, ps.Stat,
-           ph.CreationTime, ph.Hash,
+           ph.CreationTime, ph.FileHash,
       FROM Paths AS p
            LEFT JOIN PathFileStats AS ps
                   ON p.ClientId = ps.ClientId
@@ -206,7 +195,7 @@ class PathsMixin:
              LIMIT 1),
            -- File hash information.
            p.LastFileHashTime,
-           (SELECT h.Hash
+           (SELECT h.FileHash
               FROM PathFileHashes AS h
              WHERE h.ClientId = {client_id}
                AND h.Type = {type}
@@ -232,7 +221,7 @@ class PathsMixin:
 
     try:
       row = self.db.ParamQuerySingle(query, params, txn_tag="ReadPathInfo")
-    except iterator.NoYieldsError:
+    except NotFound:
       raise abstract_db.UnknownPathError(client_id, path_type, components)  # pylint: disable=raise-missing-from
 
     creation_time, is_dir, *row = row
@@ -297,7 +286,7 @@ class PathsMixin:
              LIMIT 1),
            -- File hash information.
            p.LastFileHashTime,
-           (SELECT h.Hash
+           (SELECT h.FileHash
               FROM PathFileHashes AS h
              WHERE h.ClientId = p.ClientId
                AND h.Type = p.Type
@@ -440,7 +429,7 @@ class PathsMixin:
        AND s.Path IN UNNEST({paths})
     """
     hash_query = """
-    SELECT h.Path, h.CreationTime, h.Hash
+    SELECT h.Path, h.CreationTime, h.FileHash
       FROM PathFileHashes AS h
      WHERE h.ClientId = {client_id}
        AND h.Type = {type}
@@ -461,7 +450,7 @@ class PathsMixin:
       WITH s AS ({stat_query}),
            h AS ({hash_query})
     SELECT s.Path, s.CreationTime, s.Stat,
-           h.Path, h.CreationTime, h.Hash
+           h.Path, h.CreationTime, h.FileHash
       FROM s FULL JOIN h ON s.Path = h.Path
     """
 
@@ -540,12 +529,12 @@ class PathsMixin:
                         MAX(h.CreationTime) AS LastCreationTime
                    FROM PathFileHashes AS h
                         INNER JOIN HashBlobReferences AS b
-                                ON h.Hash.sha256 = b.HashId
+                                ON h.FileHash.sha256 = b.HashId
                   WHERE ({" OR ".join(key_clauses)})
                     AND {cutoff_clause}
                   GROUP BY h.ClientId, h.Type, h.Path)
     SELECT l.ClientId, l.Type, l.Path, l.LastCreationTime,
-           s.Stat, h.Hash
+           s.Stat, h.FileHash
       FROM l
            LEFT JOIN @{{{{JOIN_METHOD=APPLY_JOIN}}}} PathFileStats AS s
                   ON s.ClientId = l.ClientId
@@ -564,7 +553,7 @@ class PathsMixin:
     for row in self.db.ParamQuery(
         query, params, txn_tag="ReadLatestPathInfosWithHashBlobReferences"
     ):
-      int_client_id, int_type, path, creation_time, *row = row
+      client_id, int_type, path, creation_time, *row = row
       stat_bytes, hash_bytes = row
 
       components = DecodePathComponents(path)
@@ -584,7 +573,7 @@ class PathsMixin:
       result.hash_entry.ParseFromString(hash_bytes)
 
       client_path = abstract_db.ClientPath(
-          client_id=db_utils.IntToClientID(int_client_id),
+          client_id=client_id,
           path_type=int_type,
           components=components,
       )
@@ -612,7 +601,7 @@ def EncodePathComponents(components: Sequence[str]) -> bytes:
     if _PATH_SEP in component:
       raise ValueError(f"Path component with a '{_PATH_SEP}' character")
 
-  return f"{_PATH_SEP}{_PATH_SEP.join(components)}".encode("utf-8")
+  return base64.b64encode(f"{_PATH_SEP}{_PATH_SEP.join(components)}".encode("utf-8"))
 
 
 def DecodePathComponents(path: bytes) -> tuple[str, ...]:
@@ -624,8 +613,7 @@ def DecodePathComponents(path: bytes) -> tuple[str, ...]:
   Returns:
     A sequence of path components.
   """
-  # TODO(hanuszczak): Add support for WTF-8 decoding of paths.
-  path = path.decode("utf-8")
+  path = base64.b64decode(path).decode("utf-8")
 
   if not path.startswith(_PATH_SEP):
     raise ValueError(f"Non-absolute path {path!r}")

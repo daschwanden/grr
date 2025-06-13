@@ -895,10 +895,11 @@ class FlowsMixin:
         for row in txn.read(table="Flows", keyset=spanner_lib.KeySet(keys=keys), columns=columns):
           client_id = row[0]
           flow_id = row[1]
+          next_request_to_process = int(row[2])
 
           candidate_requests = needs_processing.get((client_id, flow_id), [])
           for r in candidate_requests:
-            if int(row[2]) == r.request_id or r.start_time:
+            if next_request_to_process == r.request_id or r.start_time:
               req = flows_pb2.FlowProcessingRequest(
                   client_id=client_id, flow_id=flow_id
               )
@@ -1061,7 +1062,7 @@ class FlowsMixin:
     for r_key, num_responses_expected in updates.items():
       rows.append([r_key.client_id,
                    r_key.flow_id,
-                   r_key.request_id,
+                   str(r_key.request_id),
                    num_responses_expected,
       ])
       txn.update(table="FlowRequests", columns=columns, values=rows)
@@ -1112,7 +1113,7 @@ class FlowsMixin:
       needs_expected_update = {}
 
       for r in responses:
-        req_key = _RequestKey(r.client_id, r.flow_id, r.request_id)
+        req_key = _RequestKey(r.client_id, r.flow_id, int(r.request_id))
 
         # If the response is not a FlowStatus, we have nothing to do: it will be
         # simply written to the DB. If it's a FlowStatus, we have to update
@@ -1145,9 +1146,9 @@ class FlowsMixin:
 
       responses_to_write = {}
       for r in responses:
-        req_key = _RequestKey(r.client_id, r.flow_id, r.request_id)
+        req_key = _RequestKey(r.client_id, r.flow_id, int(r.request_id))
         full_key = _ResponseKey(
-            r.client_id, r.flow_id, r.request_id, r.response_id
+            r.client_id, r.flow_id, int(r.request_id), int(r.response_id)
         )
 
         if req_key not in currently_available_requests:
@@ -1268,7 +1269,7 @@ class FlowsMixin:
     unique_flow_keys = set()
 
     for req_key in set(requests) | set(callback_states):
-      req_keys.append([req_key.client_id, req_key.flow_id, req_key.request_id])
+      req_keys.append([req_key.client_id, req_key.flow_id, str(req_key.request_id)])
       unique_flow_keys.add((req_key.client_id, req_key.flow_id))
 
     for client_id, flow_id in unique_flow_keys:
@@ -1801,8 +1802,8 @@ class FlowsMixin:
       for response_id, log in logs.items():
         rows.append([client_id,
                      flow_id,
-                     request_id,
-                     response_id,
+                     str(request_id),
+                     str(response_id),
                      log.level,
                      log.timestamp.ToDatetime(),
                      log.message,
