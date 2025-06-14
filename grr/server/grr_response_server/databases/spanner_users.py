@@ -71,20 +71,6 @@ class UsersMixin:
       except NotFound:
         raise abstract_db.UnknownGRRUserError(username)
 
-      query = f"""
-        DELETE
-          FROM ApprovalGrants@{{FORCE_INDEX=ApprovalGrantsByGrantor}} AS g
-         WHERE g.Grantor = '{username}'
-      """
-      txn.execute_sql(query)
-
-      query = f"""
-        DELETE
-          FROM ScheduledFlows@{{FORCE_INDEX=ScheduledFlowsByCreator}} AS f
-         WHERE f.Creator = '{username}'
-      """
-      txn.execute_sql(query)
-
       username_range = spanner_lib.KeyRange(start_closed=[username], end_closed=[username])
       txn.delete(table="ApprovalRequests", keyset=spanner_lib.KeySet(ranges=[username_range]))
       txn.delete(table="Users", keyset=keyset)

@@ -1,11 +1,13 @@
 #!/usr/bin/env python
 """A module with hunt methods of the Spanner database implementation."""
+import base64
 
 from typing import AbstractSet, Callable, Collection, Iterable, List, Mapping, Optional, Sequence, Set
 
 from google.api_core.exceptions import AlreadyExists, NotFound
 
 from google.cloud import spanner as spanner_lib
+from google.cloud.spanner_v1 import param_types
 
 from google.protobuf import any_pb2
 from grr_response_core.lib import rdfvalue
@@ -141,31 +143,40 @@ class HuntsMixin:
     params = {
         "hunt_id": hunt_id,
     }
+    params_types = {
+        "hunt_id": param_types.STRING
+    }
     assignments = ["h.LastUpdateTime = PENDING_COMMIT_TIMESTAMP()"]
 
     if duration is not None:
       assignments.append("h.DurationMicros = @duration_micros")
       params["duration_micros"] = int(duration.microseconds)
+      params_types["duration_micros"] = param_types.INT64
 
     if client_rate is not None:
       assignments.append("h.ClientRate = @client_rate")
       params["client_rate"] = float(client_rate)
+      params_types["client_rate"] = param_types.FLOAT64
 
     if client_limit is not None:
       assignments.append("h.ClientLimit = @client_limit")
       params["client_limit"] = int(client_limit)
+      params_types["client_limit"] = param_types.INT64
 
     if hunt_state is not None:
       assignments.append("h.State = @hunt_state")
       params["hunt_state"] = int(hunt_state)
+      params_types["hunt_state"] = param_types.INT64
 
     if hunt_state_reason is not None:
       assignments.append("h.StateReason = @hunt_state_reason")
       params["hunt_state_reason"] = int(hunt_state_reason)
+      params_types["hunt_state_reason"] = param_types.INT64
 
     if hunt_state_comment is not None:
       assignments.append("h.StateComment = @hunt_state_comment")
       params["hunt_state_comment"] = hunt_state_comment
+      params_types["hunt_state_comment"] = param_types.STRING
 
     if start_time is not None:
       assignments.append(
@@ -173,14 +184,16 @@ class HuntsMixin:
       )
       assignments.append("h.LastStartTime = @start_time")
       params["start_time"] = start_time.AsDatetime()
+      params_types["start_time"] = param_types.TIMESTAMP
 
     if num_clients_at_start_time is not None:
       assignments.append(
           "h.ClientCountAtStartTime = @client_count_at_start_time"
       )
-      params["client_count_at_start_time"] = spanner_lib.UInt64(
+      params["client_count_at_start_time"] = int(
           num_clients_at_start_time
       )
+      params_types["client_count_at_start_time"] = param_types.INT64
 
     query = f"""
     UPDATE Hunts AS h
@@ -188,7 +201,7 @@ class HuntsMixin:
     WHERE h.HuntId = @hunt_id
     """
 
-    txn.execute_sql(sql=query, params=params)
+    txn.execute_update(query, params=params, param_types=params_types)
 
   @db_utils.CallLogged
   @db_utils.CallAccounted
@@ -212,7 +225,7 @@ class HuntsMixin:
       # Make sure the hunt is there.
       try:
         keyset = spanner_lib.KeySet(keys=[[hunt_id]])
-        txn.read(table="Hunts", keyset=keyset, columns=["HuntId",])
+        txn.read(table="Hunts", keyset=keyset, columns=["HuntId",]).one()
       except NotFound as e:
         raise abstract_db.UnknownHuntError(hunt_id) from e
 
@@ -236,9 +249,8 @@ class HuntsMixin:
   @db_utils.CallAccounted
   def DeleteHuntObject(self, hunt_id: str) -> None:
     """Deletes a hunt object with a given id."""
-    keyset = spanner_lib.KeySet(keys=[[hunt_id]])
     self.db.Delete(
-        table="Hunts", keyset=keyset, txn_tag="DeleteHuntObject"
+        table="Hunts", key=[hunt_id], txn_tag="DeleteHuntObject"
     )
 
   @db_utils.CallLogged
@@ -309,7 +321,9 @@ class HuntsMixin:
       with_description_match: Optional[str] = None,
       created_by: Optional[Set[str]] = None,
       not_created_by: Optional[Set[str]] = None,
-      #with_states: Optional[Collection[hunts_pb2.Hunt.HuntState]] = None, # TODO
+      with_states: Optional[
+          Iterable[hunts_pb2.Hunt.HuntState.ValueType]
+      ] = None
   ) -> list[hunts_pb2.Hunt]:
     """Reads hunt objects from the database."""
 
@@ -318,6 +332,7 @@ class HuntsMixin:
         "limit": count,
         "offset": offset,
     }
+    param_type = {}
 
     if with_creator is not None:
       conditions.append("h.Creator = {creator}")
@@ -326,10 +341,12 @@ class HuntsMixin:
     if created_by is not None:
       conditions.append("h.Creator IN UNNEST({created_by})")
       params["created_by"] = list(created_by)
+      param_type["created_by"] = param_types.Array(param_types.STRING)
 
     if not_created_by is not None:
       conditions.append("h.Creator NOT IN UNNEST({not_created_by})")
       params["not_created_by"] = list(not_created_by)
+      param_type["not_created_by"] = param_types.Array(param_types.STRING)
 
     if created_after is not None:
       conditions.append("h.CreationTime > {creation_time}")
@@ -377,7 +394,7 @@ class HuntsMixin:
     """
 
     result = []
-    for row in self.db.ParamQuery(query, params, txn_tag="ReadHuntObjects"):
+    for row in self.db.ParamQuery(query, params, param_type=param_type, txn_tag="ReadHuntObjects"):
       hunt_obj = hunts_pb2.Hunt()
       hunt_obj.ParseFromString(row[14])
 
@@ -433,6 +450,7 @@ class HuntsMixin:
         "limit": count,
         "offset": offset,
     }
+    param_type = {}
 
     if with_creator is not None:
       conditions.append("h.Creator = {creator}")
@@ -441,10 +459,12 @@ class HuntsMixin:
     if created_by is not None:
       conditions.append("h.Creator IN UNNEST({created_by})")
       params["created_by"] = list(created_by)
+      param_type["created_by"] = param_types.Array(param_types.STRING)
 
     if not_created_by is not None:
       conditions.append("h.Creator NOT IN UNNEST({not_created_by})")
       params["not_created_by"] = list(not_created_by)
+      param_type["not_created_by"] = param_types.Array(param_types.STRING)
 
     if created_after is not None:
       conditions.append("h.CreationTime > {creation_time}")
@@ -489,7 +509,8 @@ class HuntsMixin:
     """
 
     result = []
-    for row in self.db.ParamQuery(query, params, txn_tag="ListHuntObjects"):
+    for row in self.db.ParamQuery(query, params,
+                                  param_type=param_type, txn_tag="ListHuntObjects"):
       hunt_mdata = hunts_pb2.HuntMetadata()
       hunt_mdata.hunt_id = row[0]
 
@@ -800,7 +821,7 @@ class HuntsMixin:
     """
     params = {
         "hunt_id": hunt_id,
-        "output_plugin_id": output_plugin_id,
+        "output_plugin_id": int(output_plugin_id),
     }
 
     if with_type is not None:
@@ -858,17 +879,20 @@ class HuntsMixin:
       for index, state in enumerate(states):
         state_any = any_pb2.Any()
         state_any.Pack(state.plugin_state)
-        row = {
-            "HuntId": hunt_id,
-            "OutputPluginId": index,
-            "Name": state.plugin_descriptor.plugin_name,
-            "State": state_any.SerializeToString(),
-        }
+        columns = ["HuntId", "OutputPluginId",
+                   "Name",
+                   "State"
+                  ]
+        row = [hunt_id, index,
+               state.plugin_descriptor.plugin_name,
+               base64.b64encode(state_any.SerializeToString()),
+               ]
 
         if state.plugin_descriptor.HasField("args"):
-          row["Args"] = state.plugin_descriptor.args.SerializeToString()
+          columns.append("Args")
+          row.append(base64.b64encode(state.plugin_descriptor.args.SerializeToString()))
 
-        mut.InsertOrUpdate(table="HuntOutputPlugins", row=row)
+        mut.insert_or_update(table="HuntOutputPlugins", columns=columns, values=[row])
 
     try:
       self.db.Mutate(Mutation, txn_tag="WriteHuntOutputPluginsStates")
@@ -888,22 +912,20 @@ class HuntsMixin:
     def Txn(txn) -> None:
       row = txn.read(
           table="HuntOutputPlugins",
-          keyset=spanner_lib.KeySet(keys=[hunt_id, state_index]),
+          keyset=spanner_lib.KeySet(keys=[[hunt_id, state_index]]),
           columns=["Name", "Args", "State"],
-      )
+      ).one()
       state = _HuntOutputPluginStateFromRow(
-          row["Name"], row["Args"], row["State"]
+          row[0], row[1], row[2]
       )
 
       modified_plugin_state = update_fn(state.plugin_state)
       modified_plugin_state_any = any_pb2.Any()
       modified_plugin_state_any.Pack(modified_plugin_state)
-      row_update = {
-          "HuntId": int_hunt_id,
-          "OutputPluginId": state_index,
-          "State": modified_plugin_state_any.SerializeToString(),
-      }
-      txn.Update("HuntOutputPlugins", row_update)
+      columns = ["HuntId", "OutputPluginId", "State"]
+      row = [hunt_id,state_index,
+             base64.b64encode(modified_plugin_state_any.SerializeToString())]
+      txn.update("HuntOutputPlugins", columns=columns, values=[row])
 
     try:
       self.db.Transact(Txn, txn_tag="UpdateHuntOutputPluginState")
@@ -1131,6 +1153,9 @@ class HuntsMixin:
     params = {
         "hunt_ids": hunt_ids,
     }
+    param_type = {
+        "hunt_ids": param_types.Array(param_types.STRING)
+    }
 
     states_query = """
       SELECT f.ParentHuntID, f.State, COUNT(*)
@@ -1142,7 +1167,7 @@ class HuntsMixin:
     """
     counts_by_state_per_hunt = dict.fromkeys(hunt_ids, {})
     for hunt_id, state, count in self.db.ParamQuery(
-        states_query, params, txn_tag="ReadHuntCounters_1"
+        states_query, params, param_type=param_type, txn_tag="ReadHuntCounters_1"
     ):
       counts_by_state_per_hunt[hunt_id][state] = count
 
@@ -1181,7 +1206,8 @@ class HuntsMixin:
         num_results,
         num_clients_with_results,
     ) in self.db.ParamQuery(
-        resources_results_query, params, txn_tag="ReadHuntCounters_2"
+        resources_results_query, params,
+        param_type=param_type, txn_tag="ReadHuntCounters_2"
     ):
       counts_by_state = counts_by_state_per_hunt[hunt_id]
       num_successful_clients = counts_by_state.get(

@@ -240,7 +240,8 @@ class Database:
     return self.Query(query, txn_tag=txn_tag).one()
 
   def ParamQuery(
-      self, query: str, params: Mapping[str, Any], txn_tag: Optional[str] = None
+      self, query: str, params: Mapping[str, Any],
+      param_type: Optional[dict] = {}, txn_tag: Optional[str] = None
   ) -> Cursor:
     """Queries PySpanner database using the given query string with params.
 
@@ -270,13 +271,13 @@ class Database:
     names, values = collection.Unzip(params.items())
     query =  self._parametrize(query, names)
 
-    param_type = {}
     for key, value in params.items():
-      try:
-        param_type[key] = self._get_param_type(value)
-      except TypeError as e:
-        print(f"Warning for key '{key}': {e}. Setting type to None.")
-        param_type[key] = None # Or re-raise, or handle differently
+      if key not in param_type:
+        try:
+          param_type[key] = self._get_param_type(value)
+        except TypeError as e:
+          print(f"Warning for key '{key}': {e}. Setting type to None.")
+          param_type[key] = None # Or re-raise, or handle differently
 
     print("query: {}".format(query))
     print("params: {}".format(params))

@@ -1286,7 +1286,7 @@ class FlowsMixin:
                         columns=flow_cols):
       client_id: int = row[0]
       flow_id: int = row[1]
-      next_request_id: int = row[2]
+      next_request_id: int = int(row[2])
       next_request_to_process_by_flow[(client_id, flow_id)] = (
           next_request_id
       )
@@ -1533,12 +1533,12 @@ class FlowsMixin:
 
     def Mutation(mut) -> None:
       for request in requests:
-        key = [
+        keyset = spanner_lib.KeySet([[
             request.client_id,
             request.flow_id,
-            str(request.request_id),
-        ]
-        mut.Delete(table="FlowRequests", key=key)
+            str(request.request_id)
+        ]])
+        mut.delete(table="FlowRequests", keyset=keyset)
 
     try:
       self.db.Mutate(Mutation, txn_tag="DeleteFlowRequests")

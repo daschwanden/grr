@@ -275,7 +275,7 @@ CREATE TABLE ApprovalGrants(
 
   CONSTRAINT fk_approval_grant_grantor_username
     FOREIGN KEY (Grantor)
-    REFERENCES Users(Username),
+    REFERENCES Users(Username) ON DELETE CASCADE,
 ) PRIMARY KEY (Requestor, ApprovalId, Grantor, GrantId),
   INTERLEAVE IN PARENT ApprovalRequests ON DELETE CASCADE;
 
@@ -439,7 +439,7 @@ CREATE TABLE FlowRRGLogs(
 CREATE TABLE FlowOutputPluginLogEntries(
   ClientId STRING(18) NOT NULL,
   FlowId STRING(16) NOT NULL,
-  OutputPluginId STRING(16) NOT NULL,
+  OutputPluginId INT64 NOT NULL,
   HuntId STRING(16),
   CreationTime TIMESTAMP NOT NULL OPTIONS (allow_commit_timestamp = true),
   Type `grr.FlowOutputPluginLogEntry.LogEntryType` NOT NULL,
@@ -462,7 +462,7 @@ CREATE TABLE ScheduledFlows(
 
   CONSTRAINT fk_creator_users_username
     FOREIGN KEY (Creator)
-    REFERENCES Users(Username),
+    REFERENCES Users(Username) ON DELETE CASCADE,
 ) PRIMARY KEY (ClientId, Creator, ScheduledFlowId),
   INTERLEAVE IN PARENT Clients ON DELETE CASCADE;
 
@@ -580,7 +580,7 @@ CREATE INDEX HuntsByCreator ON Hunts(Creator);
 
 CREATE TABLE HuntOutputPlugins(
   HuntId STRING(16) NOT NULL,
-  OutputPluginId STRING(16) NOT NULL,
+  OutputPluginId INT64 NOT NULL,
   Name STRING(256) NOT NULL,
   Args `google.protobuf.Any`,
   State `google.protobuf.Any` NOT NULL,
