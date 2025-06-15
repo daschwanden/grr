@@ -16,7 +16,6 @@ CREATE PROTO BUNDLE (
   `grr.UserNotification`,
   `grr.UserNotification.State`,
   `grr.UserNotification.Type`,
-   -- RDF magic types.
   `grr.AttributedDict`,
   `grr.BlobArray`,
   `grr.Dict`,
@@ -24,7 +23,6 @@ CREATE PROTO BUNDLE (
   `grr.DataBlob.CompressionType`,
   `grr.EmbeddedRDFValue`,
   `grr.KeyValue`,
-   -- Client snapshot types.
   `grr.AmazonCloudInstance`,
   `grr.ClientInformation`,
   `grr.ClientCrash`,
@@ -48,7 +46,6 @@ CREATE PROTO BUNDLE (
   `grr.WindowsVolume`,
   `grr.WindowsVolume.WindowsDriveTypeEnum`,
   `grr.WindowsVolume.WindowsVolumeAttributeEnum`,
-   -- Notification reference types.
   `grr.ApprovalRequestReference`,
   `grr.ClientReference`,
   `grr.CronJobReference`,
@@ -59,7 +56,6 @@ CREATE PROTO BUNDLE (
   `grr.ObjectReference`,
   `grr.ObjectReference.Type`,
   `grr.VfsFileReference`,
-   -- Flow types.
   `grr.CpuSeconds`,
   `grr.Flow`,
   `grr.Flow.FlowState`,
@@ -82,10 +78,8 @@ CREATE PROTO BUNDLE (
   `grr.OutputPluginDescriptor`,
   `grr.OutputPluginState`,
   `grr.RequestState`,
-   -- Audit events types.
   `grr.APIAuditEntry`,
   `grr.APIAuditEntry.Code`,
-   -- File-related types.
   `grr.AuthenticodeSignedData`,
   `grr.BlobImageChunkDescriptor`,
   `grr.BlobImageDescriptor`,
@@ -100,7 +94,6 @@ CREATE PROTO BUNDLE (
   `grr.StatEntry`,
   `grr.StatEntry.ExtAttr`,
   `grr.StatEntry.RegistryType`,
-   -- Foreman rules types.
   `grr.ForemanClientRule`,
   `grr.ForemanClientRule.Type`,
   `grr.ForemanClientRuleSet`,
@@ -116,13 +109,11 @@ CREATE PROTO BUNDLE (
   `grr.ForemanRegexClientRule.ForemanStringField`,
   `grr.ForemanRule`,
   `grr.ForemanRuleAction`,
-   -- Artifact types.
   `grr.Artifact`,
   `grr.ArtifactSource`,
   `grr.ArtifactSource.SourceType`,
   `grr.ArtifactDescriptor`,
   `grr.ClientActionResult`,
-   -- Hunt types.
   `grr.Hunt`,
   `grr.Hunt.HuntState`,
   `grr.Hunt.HuntStateReason`,
@@ -131,12 +122,10 @@ CREATE PROTO BUNDLE (
   `grr.HuntArgumentsStandard`,
   `grr.HuntArgumentsVariable`,
   `grr.VariableHuntFlowGroup`,
-   -- SignedBinary types.
   `grr.BlobReference`,
   `grr.BlobReferences`,
   `grr.SignedBinaryID`,
   `grr.SignedBinaryID.BinaryType`,
-   -- CronJobs types.
   `grr.CronJob`,
   `grr.CronJobAction`,
   `grr.CronJobAction.ActionType`,
@@ -145,14 +134,11 @@ CREATE PROTO BUNDLE (
   `grr.SystemCronAction`,
   `grr.HuntCronAction`,
   `grr.HuntRunnerArgs`,
-   -- Message handlers.
   `grr.MessageHandlerRequest`,
-   -- Signed Command types.
   `grr.Command`,
   `grr.Command.EnvVar`,
   `grr.SignedCommand`,
   `grr.SignedCommand.OS`,
-   -- RRG types.
   `rrg.Log`,
   `rrg.Log.Level`,
   `rrg.fs.Path`,
@@ -242,11 +228,6 @@ CREATE TABLE ApprovalRequests(
   CONSTRAINT fk_approval_request_requestor_username
     FOREIGN KEY (Requestor)
     REFERENCES Users(Username),
-
-  -- TODO: Foreign keys on ARRAY columns are not supported, can we put an alternative in place?
-  -- CONSTRAINT fk_approval_request_notified_users_usernames
-  --   FOREIGN KEY UNNEST(NotifiedUsers) (NotifiedUsers)
-  --   REFERENCES Users(Username),
 
   CONSTRAINT ck_subject_id_valid
        CHECK ((IF(SubjectClientId IS NOT NULL, 1, 0) +
@@ -503,10 +484,8 @@ CREATE TABLE PathFileHashes(
   INTERLEAVE IN PARENT Paths ON DELETE CASCADE;
 
 CREATE TABLE HashBlobReferences(
-  -- 32 bytes is enough for SHA256 used for hash ids.
   HashId BYTES(32) NOT NULL,
   Offset INT64 NOT NULL,
-  -- 32 bytes is enough for SHA256 used for blob ids.
   BlobId BYTES(32) NOT NULL,
   Size INT64 NOT NULL,
 
@@ -538,7 +517,6 @@ CREATE TABLE YaraSignatureReferences(
   CONSTRAINT fk_yara_signature_reference_creator_username
     FOREIGN KEY (Creator)
     REFERENCES Users(Username)
-    ENFORCED
 ) PRIMARY KEY (BlobId);
 
 CREATE TABLE Hunts(
@@ -655,11 +633,8 @@ ALTER TABLE ApprovalRequests
     ON DELETE CASCADE;
 
 CREATE TABLE BlobEncryptionKeys(
-  -- A unique identifier of the blob.
   BlobId BYTES(32) NOT NULL,
-  -- A timestamp at which the association was created.
   CreationTime TIMESTAMP NOT NULL OPTIONS (allow_commit_timestamp = true),
-  -- A name of the key (to retrieve the key from Keystore).
   KeyName STRING(256) NOT NULL,
 ) PRIMARY KEY (BlobId, CreationTime);
 

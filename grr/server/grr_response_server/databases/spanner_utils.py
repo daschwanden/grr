@@ -452,15 +452,12 @@ class Database:
     columns = list(columns)
     values = list(values)
 
-    with self._pyspanner.mutation_groups() as groups:
-      groups.group().insert_or_update(
+    with self._pyspanner.batch() as batch:
+      batch.insert_or_update(
         table=table,
         columns=columns,
         values=[values]
       )
-      for response in groups.batch_write():
-        if response.status.code != OK:
-          raise Exception(response.status.message)
 
   def Delete(
       self, table: str, key: Sequence[Any], txn_tag: Optional[str] = None

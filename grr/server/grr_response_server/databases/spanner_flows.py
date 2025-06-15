@@ -2297,10 +2297,22 @@ class FlowsMixin:
 
       return flow
 
+    def Txn2(txn) -> flows_pb2.Flow:
+      try:
+        row = txn.read(
+            table="Flows",
+            keyset=spanner_lib.KeySet(keys=[[client_id, flow_id]]),
+            columns=_READ_FLOW_OBJECT_COLS,
+        ).one()
+        flow = _ParseReadFlowObjectRow(client_id, flow_id, row)
+        print(flow)
+      except NotFound as error:
+        raise db.UnknownFlowError(client_id, flow_id, cause=error)
+      return flow
+
     leased_flow = self.db.Transact(Txn)
-    #leased_flow.processing_since = int(
-    #    rdfvalue.RDFDatetime.FromDatetime(commit_stats.commit_timestamp)
-    #)
+    flow = self.db.Transact(Txn2)
+    leased_flow.processing_since = flow.processing_since
     return leased_flow
 
   @db_utils.CallLogged
