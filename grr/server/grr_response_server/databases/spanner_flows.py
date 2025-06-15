@@ -8,6 +8,7 @@ from typing import Any, Callable, Collection, Dict, Iterable, List, Mapping, Opt
 
 from google.api_core.exceptions import AlreadyExists, NotFound
 from google.cloud import spanner as spanner_lib
+from google.cloud.spanner_v1 import param_types
 
 from grr_response_core.lib import rdfvalue
 from grr_response_core.lib import utils
@@ -74,9 +75,10 @@ def _BuildReadFlowResultsErrorsConditions(
     with_tag: Optional[str] = None,
     with_type: Optional[str] = None,
     with_substring: Optional[str] = None,
-) -> tuple[str, Mapping[str, Any]]:
+) -> tuple[str, Mapping[str, Any], Mapping[str, Any]]:
   """Builds query string and params for results/errors reading queries."""
   params = {}
+  param_type = {}
 
   query = f"""
   SELECT t.Payload, t.RdfType, t.CreationTime, t.Tag, t.HuntId
@@ -93,16 +95,19 @@ def _BuildReadFlowResultsErrorsConditions(
   if with_tag is not None:
     query += " AND t.Tag = {tag} "
     params["tag"] = with_tag
+    param_type["tag"] = param_types.STRING
 
   if with_type is not None:
     query += " AND t.RdfType = {type}"
     params["type"] = with_type
+    param_type["type"] = param_types.STRING
 
   if with_substring is not None:
     query += """
     AND STRPOS(SAFE_CONVERT_BYTES_TO_STRING(t.Payload.value), {substring}) != 0
     """
     params["substring"] = with_substring
+    param_type["substring"] = param_types.STRING
 
   query += """
   ORDER BY t.CreationTime ASC LIMIT {count} OFFSET {offset}
@@ -110,7 +115,7 @@ def _BuildReadFlowResultsErrorsConditions(
   params["offset"] = offset
   params["count"] = count
 
-  return query, params
+  return query, params, param_type
 
 
 def _BuildCountFlowResultsErrorsConditions(
@@ -119,9 +124,10 @@ def _BuildCountFlowResultsErrorsConditions(
     flow_id: str,
     with_tag: Optional[str] = None,
     with_type: Optional[str] = None,
-) -> tuple[str, Mapping[str, Any]]:
+) -> tuple[str, Mapping[str, Any], Mapping[str, Any]]:
   """Builds query string and params for count flow results/errors queries."""
   params = {}
+  param_type = {}
 
   query = f"""
   SELECT COUNT(*)
@@ -138,12 +144,14 @@ def _BuildCountFlowResultsErrorsConditions(
   if with_tag is not None:
     query += " AND t.Tag = {tag} "
     params["tag"] = with_tag
+    param_type["tag"] = param_types.STRING
 
   if with_type is not None:
     query += " AND t.RdfType = {type}"
     params["type"] = with_type
+    param_type["type"] = param_types.STRING
 
-  return query, params
+  return query, params, param_type
 
 
 _READ_FLOW_OBJECT_COLS = (
@@ -539,7 +547,7 @@ class FlowsMixin:
       with_substring: Optional[str] = None,
   ) -> Sequence[flows_pb2.FlowResult]:
     """Reads flow results of a given flow using given query options."""
-    query, params = _BuildReadFlowResultsErrorsConditions(
+    query, params, param_type = _BuildReadFlowResultsErrorsConditions(
         "FlowResults",
         client_id,
         flow_id,
@@ -557,7 +565,8 @@ class FlowsMixin:
         creation_time,
         tag,
         hunt_id,
-    ) in self.db.ParamQuery(query, params, txn_tag="ReadFlowResults"):
+    ) in self.db.ParamQuery(query, params, param_type=param_type,
+                            txn_tag="ReadFlowResults"):
       result = flows_pb2.FlowResult(
           client_id=client_id,
           flow_id=flow_id,
@@ -589,7 +598,7 @@ class FlowsMixin:
       with_type: Optional[str] = None,
   ) -> Sequence[flows_pb2.FlowError]:
     """Reads flow errors of a given flow using given query options."""
-    query, params = _BuildReadFlowResultsErrorsConditions(
+    query, params, param_type = _BuildReadFlowResultsErrorsConditions(
         "FlowErrors",
         client_id,
         flow_id,
@@ -607,7 +616,8 @@ class FlowsMixin:
         creation_time,
         tag,
         hunt_id,
-    ) in self.db.ParamQuery(query, params, txn_tag="ReadFlowErrors"):
+    ) in self.db.ParamQuery(query, params, param_type=param_type,
+                            txn_tag="ReadFlowErrors"):
       error = flows_pb2.FlowError(
           client_id=client_id,
           flow_id=flow_id,
@@ -616,7 +626,7 @@ class FlowsMixin:
           ).AsMicrosecondsSinceEpoch(),
       )
 
-      # TODO(b/309429206): for separation of concerns reasons,
+      # for separation of concerns reasons,
       # ReadFlowResults/ReadFlowErrors shouldn't do the payload type validation,
       # they should be completely agnostic to what payloads get written/read
       # to/from the database. Keeping this logic here temporarily
@@ -650,11 +660,11 @@ class FlowsMixin:
   ) -> int:
     """Counts flow results of a given flow using given query options."""
 
-    query, params = _BuildCountFlowResultsErrorsConditions(
+    query, params, param_type = _BuildCountFlowResultsErrorsConditions(
         "FlowResults", client_id, flow_id, with_tag, with_type
     )
     (count,) = self.db.ParamQuerySingle(
-        query, params, txn_tag="CountFlowResults"
+        query, params, param_type=param_type, txn_tag="CountFlowResults"
     )
     return count
 
@@ -669,11 +679,11 @@ class FlowsMixin:
   ) -> int:
     """Counts flow errors of a given flow using given query options."""
 
-    query, params = _BuildCountFlowResultsErrorsConditions(
+    query, params, param_type = _BuildCountFlowResultsErrorsConditions(
         "FlowErrors", client_id, flow_id, with_tag, with_type
     )
     (count,) = self.db.ParamQuerySingle(
-        query, params, txn_tag="CountFlowErrors"
+        query, params, param_type=param_type, txn_tag="CountFlowErrors"
     )
     return count
 
