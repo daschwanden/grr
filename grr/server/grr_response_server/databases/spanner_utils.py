@@ -293,7 +293,8 @@ class Database:
     return results
 
   def ParamQuerySingle(
-      self, query: str, params: Mapping[str, Any], txn_tag: Optional[str] = None
+      self, query: str, params: Mapping[str, Any],
+      param_type: Optional[dict] = {}, txn_tag: Optional[str] = None
   ) -> Row:
     """Queries the database for a single row using with a query with params.
 
@@ -314,7 +315,7 @@ class Database:
       ValueError: If the query contains disallowed sequences.
       KeyError: If some parameter is not specified.
     """
-    return self.ParamQuery(query, params, txn_tag=txn_tag).one()
+    return self.ParamQuery(query, params, param_type=param_type, txn_tag=txn_tag).one()
 
   def ParamExecute(
       self, query: str, params: Mapping[str, Any], txn_tag: Optional[str] = None

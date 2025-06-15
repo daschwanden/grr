@@ -39,7 +39,7 @@ def _HuntOutputPluginStateFromRow(
 
   plugin_state_any = any_pb2.Any()
   plugin_state_any.ParseFromString(plugin_state)
-  # TODO(b/120464908): currently AttributedDict is used to store output
+  # currently AttributedDict is used to store output
   # plugins' states. This is suboptimal and unsafe and should be refactored
   # towards using per-plugin protos.
   attributed_dict = jobs_pb2.AttributedDict()
@@ -564,6 +564,7 @@ class HuntsMixin:
         "offset": offset,
         "count": count,
     }
+    param_type = {}
 
     query = """
     SELECT t.Payload, t.CreationTime, t.Tag, t.ClientId, t.FlowId
@@ -575,10 +576,12 @@ class HuntsMixin:
     if with_tag is not None:
       query += " AND t.Tag = {tag} "
       params["tag"] = with_tag
+      param_type["tag"] = param_types.STRING
 
     if with_type is not None:
       query += " AND t.RdfType = {type}"
       params["type"] = with_type
+      param_type["type"] = param_types.STRING
 
     if with_substring is not None:
       query += (
@@ -586,10 +589,12 @@ class HuntsMixin:
           "{substring}) != 0"
       )
       params["substring"] = with_substring
+      param_type["substring"] = param_types.STRING
 
     if with_timestamp is not None:
       query += " AND t.CreationTime = {creation_time}"
       params["creation_time"] = with_timestamp.AsDatetime()
+      param_type["creation_time"] = param_types.TIMESTAMP
 
     query += """
     ORDER BY t.CreationTime ASC LIMIT {count} OFFSET {offset}
@@ -602,7 +607,8 @@ class HuntsMixin:
         tag,
         client_id,
         flow_id,
-    ) in self.db.ParamQuery(query, params, txn_tag="ReadHuntResults"):
+    ) in self.db.ParamQuery(query, params, param_type=param_type,
+                            txn_tag="ReadHuntResults"):
       result = flows_pb2.FlowResult()
       result.hunt_id = hunt_id
       result.client_id = client_id
@@ -629,6 +635,7 @@ class HuntsMixin:
     params = {
         "hunt_id": hunt_id,
     }
+    param_type = {}
 
     query = """
     SELECT COUNT(*)
@@ -639,13 +646,17 @@ class HuntsMixin:
     if with_tag is not None:
       query += " AND t.Tag = {tag} "
       params["tag"] = with_tag
+      param_type["tag"] = param_types.STRING
 
     if with_type is not None:
       query += " AND t.RdfType = {type}"
       params["type"] = with_type
+      param_type["type"] = param_types.STRING
 
     (count,) = self.db.ParamQuerySingle(
-        query, params, txn_tag="CountHuntResults"
+        query, params,
+        param_type=param_type,
+        txn_tag="CountHuntResults"
     )
     return count
 
@@ -762,19 +773,22 @@ class HuntsMixin:
     SELECT l.ClientId,
            l.FlowId,
            l.CreationTime,
-           l.Type, l.Message
-      FROM FlowOutputPluginLogEntries AS l
-     WHERE l.HuntId = {hunt_id}
+           l.Type,
+           l.Message
+    FROM FlowOutputPluginLogEntries AS l
+    WHERE l.HuntId = {hunt_id}
        AND l.OutputPluginId = {output_plugin_id}
     """
     params = {
         "hunt_id": hunt_id,
         "output_plugin_id": output_plugin_id,
     }
+    param_type = {}
 
     if with_type is not None:
       query += " AND l.Type = {type}"
       params["type"] = int(with_type)
+      param_type["type"] = param_types.INT64
 
     query += """
      LIMIT {count}
@@ -785,7 +799,8 @@ class HuntsMixin:
 
     results = []
     for row in self.db.ParamQuery(
-        query, params, txn_tag="ReadHuntOutputPluginLogEntries"
+        query, params, param_type=param_type,
+        txn_tag="ReadHuntOutputPluginLogEntries"
     ):
       client_id, flow_id, creation_time, int_type, message = row
 
@@ -821,7 +836,7 @@ class HuntsMixin:
     """
     params = {
         "hunt_id": hunt_id,
-        "output_plugin_id": int(output_plugin_id),
+        "output_plugin_id": output_plugin_id,
     }
 
     if with_type is not None:

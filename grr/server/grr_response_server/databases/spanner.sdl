@@ -439,7 +439,7 @@ CREATE TABLE FlowRRGLogs(
 CREATE TABLE FlowOutputPluginLogEntries(
   ClientId STRING(18) NOT NULL,
   FlowId STRING(16) NOT NULL,
-  OutputPluginId INT64 NOT NULL,
+  OutputPluginId STRING(16) NOT NULL,
   HuntId STRING(16),
   CreationTime TIMESTAMP NOT NULL OPTIONS (allow_commit_timestamp = true),
   Type `grr.FlowOutputPluginLogEntry.LogEntryType` NOT NULL,
