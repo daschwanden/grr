@@ -1986,12 +1986,14 @@ class FlowsMixin:
         "flow_id": flow_id,
         "output_plugin_id": output_plugin_id,
     }
+    param_type = {}
 
     if with_type is not None:
       query += " AND l.Type = {type}"
       params["type"] = int(with_type)
+      param_type["type"] = param_types.INT64
 
-    (count,) = self.db.ParamQuerySingle(query, params)
+    (count,) = self.db.ParamQuerySingle(query, params, param_type=param_type)
     return count
 
   @db_utils.CallLogged
