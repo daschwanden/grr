@@ -416,9 +416,12 @@ class UsersMixin:
         "State": int(notification.state),
         "CreationTime": spanner_lib.COMMIT_TIMESTAMP,
         "Message": notification.message,
+        # Written unconditionally: the column is NOT NULL and message fields
+        # are always truthy in proto3, so a conditional would be misleading.
+        "Reference": base64.b64encode(
+            notification.reference.SerializeToString()
+        ),
     }
-    if notification.reference:
-      row["Reference"] = base64.b64encode(notification.reference.SerializeToString())
 
     try:
       self.db.Insert(
@@ -517,15 +520,6 @@ class UsersMixin:
     """
 
     self.db.ParamExecute(query, params, txn_tag="UpdateUserNotifications")
-
-
-def _HexApprovalID(approval_id: int) -> str:
-  return f"{approval_id:016x}"
-
-
-def _UnhexApprovalID(approval_id: str) -> int:
-  return int(approval_id, base=16)
-
 
 
 def RDFDatetime(time: datetime.datetime) -> rdfvalue.RDFDatetime:

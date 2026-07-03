@@ -385,7 +385,7 @@ class HuntsMixin:
       h.LastStartTime,
       h.ClientCountAtStartTime,
       h.Hunt
-    FROM Hunts AS h
+    FROM Hunts@{{FORCE_INDEX=HuntsByCreationTime}} AS h
     """
 
     if conditions:
@@ -500,7 +500,7 @@ class HuntsMixin:
       h.StateComment,
       h.InitStartTime,
       h.LastStartTime,
-    FROM Hunts AS h
+    FROM Hunts@{{FORCE_INDEX=HuntsByCreationTime}} AS h
     """
 
     if conditions:
@@ -717,6 +717,7 @@ class HuntsMixin:
       params["substring"] = with_substring
 
     query += """
+     ORDER BY l.CreationTime ASC
      LIMIT {count}
     OFFSET {offset}
     """
@@ -794,6 +795,7 @@ class HuntsMixin:
       param_type["type"] = param_types.INT64
 
     query += """
+     ORDER BY l.CreationTime ASC
      LIMIT {count}
     OFFSET {offset}
     """
@@ -1087,7 +1089,7 @@ class HuntsMixin:
 
       info = abstract_db.FlowErrorInfo(
           message=message,
-          time=rdfvalue.RDFDatetime.FromDate(time),
+          time=rdfvalue.RDFDatetime.FromDatetime(time),
       )
       if backtrace:
         info.backtrace = backtrace

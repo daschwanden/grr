@@ -6,6 +6,7 @@ from typing import Any, Mapping, Optional, Sequence
 
 from google.api_core.exceptions import NotFound
 from google.cloud import spanner as spanner_lib
+from google.cloud.spanner_v1 import param_types
 
 from grr_response_core.lib import rdfvalue
 from grr_response_core.lib import utils
@@ -306,34 +307,24 @@ class CronJobsMixin:
     if not jobs:
       return
 
-    # Identify jobs that are not lease (cannot be returned). If there are any
+    # Identify jobs that are not leased (cannot be returned). If there are any
     # leased jobs that need returning, then we'll go ahead and try to update
     # them anyway.
     unleased_jobs = []
-    conditions = []
-    jobs_to_update_args = {}
-    for i, job in enumerate(jobs):
+    leased_job_keys = []
+    for job in jobs:
       if not job.leased_by or not job.leased_until:
         unleased_jobs.append(job)
         continue
 
-      conditions.append(
-          "(cj.JobId=@job_%d AND "
-          "cj.LeaseEndTime=@ld_%d AND "
-          "cj.LeaseOwner=@lo_%d)" % (i, i, i)
-      )
       dt_leased_until = (
           rdfvalue.RDFDatetime()
           .FromMicrosecondsSinceEpoch(job.leased_until)
           .AsDatetime()
       )
-      jobs_to_update_args[i] = (
-          job.cron_job_id,
-          dt_leased_until,
-          job.leased_by,
-      )
+      leased_job_keys.append([job.cron_job_id, dt_leased_until, job.leased_by])
 
-    if not conditions:  # all jobs are unleased.
+    if not leased_job_keys:  # all jobs are unleased.
       raise ValueError("CronJobs to return are not leased: %s" % unleased_jobs)
 
     # We can't simply Update the rows because `UPDATE ... SET` will not return
@@ -346,19 +337,33 @@ class CronJobsMixin:
       # ---------------------------------------------------------------------
       # Query IDs to be updated on this transaction
       # ---------------------------------------------------------------------
+      # A single array-of-struct parameter is used instead of one OR-ed
+      # condition (with three parameters) per job: the query text stays
+      # constant and the number of jobs is not limited by Spanner's
+      # per-query parameter limit.
       query_job_ids_to_return = """
       SELECT cj.JobId
         FROM CronJobs as cj
+       WHERE (cj.JobId, cj.LeaseEndTime, cj.LeaseOwner)
+             IN UNNEST(@leased_job_keys)
       """
-      params_job_ids_to_return = {}
-      query_job_ids_to_return += "WHERE" + " OR ".join(conditions)
-      for i, (job_id, ld, lo) in jobs_to_update_args.items():
-        params_job_ids_to_return["job_%d" % i] = job_id
-        params_job_ids_to_return["ld_%d" % i] = ld
-        params_job_ids_to_return["lo_%d" % i] = lo
+      params_job_ids_to_return = {"leased_job_keys": leased_job_keys}
+      types_job_ids_to_return = {
+          "leased_job_keys": param_types.Array(
+              param_types.Struct([
+                  param_types.StructField("JobId", param_types.STRING),
+                  param_types.StructField(
+                      "LeaseEndTime", param_types.TIMESTAMP
+                  ),
+                  param_types.StructField("LeaseOwner", param_types.STRING),
+              ])
+          ),
+      }
 
       response = txn.execute_sql(
-          query_job_ids_to_return, params_job_ids_to_return
+          query_job_ids_to_return,
+          params_job_ids_to_return,
+          param_types=types_job_ids_to_return,
       )
 
       ids_to_return = []
@@ -453,7 +458,7 @@ class CronJobsMixin:
           table="CronJobRuns", row=row, txn_tag="WriteCronJobRun"
       )
     except Exception as error:
-      if "Parent row for row [" in str(error):
+      if spanner_utils.IsMissingParentRowError(error):
         # This error can be raised only when the parent cron job does not exist.
         message = f"Cron job with id '{run_object.cron_job_id}' not found."
         raise db.UnknownCronJobError(message) from error
@@ -559,26 +564,18 @@ class CronJobsMixin:
     Returns:
       The number of deleted runs.
     """
+    # Partitioned DML is used so that the delete is not limited by the
+    # per-commit transaction size. Atomicity is not needed for this cleanup:
+    # rows that survive a partial failure are deleted by the next run.
     query = """
-    SELECT cjr.JobId, cjr.RunId
-      FROM CronJobRuns AS cjr
-     WHERE cjr.CreationTime < @cutoff_timestamp
+    DELETE FROM CronJobRuns
+    WHERE CronJobRuns.CreationTime < {cutoff_timestamp}
     """
     params = {"cutoff_timestamp": cutoff_timestamp.AsDatetime()}
 
-    def Transaction(txn) -> int:
-      rows = list(txn.execute_sql(sql=query, params=params))
-
-      for job_id, run_id in rows:
-        keyset = spanner_lib.KeySet(keys=[[job_id, run_id]])
-        txn.delete(
-          table="CronJobRuns",
-          keyset=keyset,
-        )
-
-      return len(rows)
-
-    return self.db.Transact(Transaction, txn_tag="DeleteOldCronJobRuns")
+    return self.db.ExecutePartitioned(
+        query, params=params, txn_tag="DeleteOldCronJobRuns"
+    )
 
   def _SelectCronJobsWith(
       self,

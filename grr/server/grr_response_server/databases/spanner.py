@@ -47,7 +47,7 @@ class SpannerDB(
   def __init__(self, db: spanner_utils.Database) -> None:
     """Initializes the database."""
     self.db = db
-    self._write_rows_batch_size = 100
+    self._write_rows_batch_size = config.CONFIG["Spanner.write_rows_batch_size"]
 
     self.handler_thread = None
     self.handler_stop = True

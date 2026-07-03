@@ -351,17 +351,20 @@ CREATE TABLE FlowResults(
 ) PRIMARY KEY (ClientId, FlowId, CreationTime, ResultId),
   INTERLEAVE IN PARENT Flows ON DELETE CASCADE;
 
-CREATE INDEX FlowResultsByHuntIdCreationTime
+-- NULL_FILTERED: results of non-hunt flows have a NULL HuntId and are never
+-- queried through these indexes (their RdfType and Tag columns are always
+-- non-NULL - unset tags are stored as empty strings).
+CREATE NULL_FILTERED INDEX FlowResultsByHuntIdCreationTime
   ON FlowResults(HuntId, CreationTime);
-CREATE INDEX FlowResultsByHuntIdFlowIdCreationTime
+CREATE NULL_FILTERED INDEX FlowResultsByHuntIdFlowIdCreationTime
   ON FlowResults(HuntId, FlowId, CreationTime);
-CREATE INDEX FlowResultsByHuntIdFlowIdRdfTypeTagCreationTime
+CREATE NULL_FILTERED INDEX FlowResultsByHuntIdFlowIdRdfTypeTagCreationTime
   ON FlowResults(HuntId, FlowId, RdfType, Tag, CreationTime);
 
 CREATE TABLE FlowErrors(
   ClientId STRING(18) NOT NULL,
   FlowId STRING(16) NOT NULL,
-  HuntId STRING(16) NOT NULL,
+  HuntId STRING(16),
   CreationTime TIMESTAMP NOT NULL,
   ErrorId STRING(36) NOT NULL,
   Payload `google.protobuf.Any`,
@@ -370,9 +373,10 @@ CREATE TABLE FlowErrors(
 ) PRIMARY KEY (ClientId, FlowId, CreationTime, ErrorId),
   INTERLEAVE IN PARENT Flows ON DELETE CASCADE;
 
-CREATE INDEX FlowErrorsByHuntIdFlowIdCreationTime
+-- NULL_FILTERED: see the FlowResults indexes above.
+CREATE NULL_FILTERED INDEX FlowErrorsByHuntIdFlowIdCreationTime
   ON FlowErrors(HuntId, FlowId, CreationTime);
-CREATE INDEX FlowErrorsByHuntIdFlowIdRdfTypeTagCreationTime
+CREATE NULL_FILTERED INDEX FlowErrorsByHuntIdFlowIdRdfTypeTagCreationTime
   ON FlowErrors(HuntId, FlowId, RdfType, Tag, CreationTime);
 
 CREATE TABLE FlowRequests(

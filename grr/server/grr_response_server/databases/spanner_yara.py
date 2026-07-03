@@ -36,7 +36,9 @@ class YaraMixin:
           txn_tag="WriteYaraSignatureReference",
       )
     except Exception as error:
-      if "fk_yara_signature_reference_creator_username" in str(error):
+      if spanner_utils.IsConstraintViolatedError(
+          error, "fk_yara_signature_reference_creator_username"
+      ):
         raise db.UnknownGRRUserError(username) from error
       else:
         raise

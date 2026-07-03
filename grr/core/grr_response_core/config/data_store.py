@@ -151,3 +151,14 @@ config_lib.DEFINE_integer(
     default=20,
     help="The maximum number of flow-processing worker threads.",
 )
+
+config_lib.DEFINE_integer(
+    "Spanner.write_rows_batch_size",
+    default=1000,
+    help=(
+        "The maximum number of rows written per Spanner commit when writing "
+        "large batches (e.g. flow results). The effective mutation count per "
+        "commit is roughly rows * (columns + index entries) and must stay "
+        "below Spanner's per-commit mutation limit."
+    ),
+)

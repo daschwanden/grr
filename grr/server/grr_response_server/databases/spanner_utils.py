@@ -3,6 +3,7 @@
 from collections.abc import Callable, Iterable, Mapping, Sequence
 import datetime
 import decimal
+import logging
 import re
 from typing import Any, Optional, Tuple, TypeVar
 
@@ -20,13 +21,29 @@ Row = Tuple[Any, ...]
 Cursor = Iterable[Row]
 
 _T = TypeVar("_T")
-class Mutation(_Mutation):
-  """A wrapper around the PySpanner Mutation class."""
-  pass
 
-class Transaction(_Transaction):
-  """A wrapper around the PySpanner Transaction class."""
-  pass
+# Aliases so that users of this module do not have to depend on PySpanner
+# internals directly (e.g. for type annotations).
+Mutation = _Mutation
+Transaction = _Transaction
+
+
+def IsMissingParentRowError(error: Exception) -> bool:
+  """Whether the error indicates a missing parent row of an interleaved table.
+
+  PySpanner raises such failures without a dedicated exception type, so the
+  error message has to be matched. Centralizing the check here keeps that
+  brittleness in a single place.
+  """
+  return "Parent row for row [" in str(error)
+
+
+def IsConstraintViolatedError(error: Exception, constraint_name: str) -> bool:
+  """Whether the error indicates a violation of the given named constraint.
+
+  See `IsMissingParentRowError` on why the error message is matched.
+  """
+  return constraint_name in str(error)
 
 class Database:
   """A wrapper around the PySpanner class.
@@ -233,8 +250,11 @@ class Database:
         try:
           param_type[key] = self._get_param_type(value)
         except TypeError as e:
-          print(f"Warning for key '{key}': {e}. Setting type to None.")
-          param_type[key] = None # Or re-raise, or handle differently
+          logging.warning(
+              "Cannot infer Spanner type of param %r (%s), leaving it untyped.",
+              key, e,
+          )
+          param_type[key] = None
 
     return query, param_type
 
@@ -289,16 +309,7 @@ class Database:
       ValueError: If the query contains disallowed sequences.
       KeyError: If some parameter is not specified.
     """
-    names, _ = collection.Unzip(params.items())
-    query = self._parametrize(query, names)
-
-    param_type = {}
-    for key, value in params.items():
-      try:
-        param_type[key] = self._get_param_type(value)
-      except TypeError as e:
-        print(f"Warning for key '{key}': {e}. Setting type to None.")
-        param_type[key] = None # Or re-raise, or handle differently
+    query, param_type = self._PrepareParamQuery(query, params)
 
     def param_execute(txn: Transaction):
       txn.execute_update(
@@ -311,9 +322,13 @@ class Database:
     self._pyspanner.run_in_transaction(param_execute)
 
   def ExecutePartitioned(
-      self, query: str, txn_tag: Optional[str] = None
-  ) -> None:
-    """Executes the given query against a Spanner database.
+      self,
+      query: str,
+      params: Optional[Mapping[str, Any]] = None,
+      param_type: Optional[dict] = None,
+      txn_tag: Optional[str] = None,
+  ) -> int:
+    """Executes the given query as partitioned DML against a Spanner database.
 
     This is a more efficient variant of the `Execute` method, but it does not
     guarantee atomicity. See the official documentation on partitioned updates
@@ -322,14 +337,24 @@ class Database:
     [1]: go/spanner-partitioned-dml
 
     Args:
-      query: An SQL query string to execute.
+      query: An SQL query string to execute, optionally with parameter
+        placeholders (see `ParamQuery`).
+      params: An optional dictionary mapping parameter name to a value.
+      param_type: An optional dictionary with explicit parameter types.
       txn_tag: Spanner transaction tag.
 
     Returns:
-      Nothing.
+      A lower bound of the number of rows modified.
     """
-    return self._pyspanner.execute_partitioned_dml(query,
-                                                   request_options={"request_tag": txn_tag})
+    if params:
+      query, param_type = self._PrepareParamQuery(query, params, param_type)
+
+    return self._pyspanner.execute_partitioned_dml(
+        query,
+        params=params,
+        param_types=param_type,
+        request_options={"request_tag": txn_tag},
+    )
 
   def Insert(
       self, table: str, row: Mapping[str, Any], txn_tag: Optional[str] = None
@@ -418,10 +443,15 @@ class Database:
 
     Returns:
       Nothing.
+
+    Raises:
+      ValueError: If the key is empty (a caller bug that would otherwise
+        silently delete every row of the table).
     """
-    keyset = KeySet(all_=True)
-    if key:
-      keyset = KeySet(keys=[key])
+    if not key:
+      raise ValueError(f"Empty key for deletion from table '{table}'")
+
+    keyset = KeySet(keys=[key])
     with self._pyspanner.batch(request_options={"request_tag": txn_tag}) as batch:
       batch.delete(table, keyset)
 
@@ -436,7 +466,14 @@ class Database:
 
     Returns:
       Nothing.
+
+    Raises:
+      ValueError: If the key prefix is empty (a caller bug that would
+        otherwise silently delete every row of the table).
     """
+    if not key_prefix:
+      raise ValueError(f"Empty key prefix for deletion from table '{table}'")
+
     range = KeyRange(start_closed=key_prefix, end_closed=key_prefix)
     keyset = KeySet(ranges=[range])
 

@@ -120,12 +120,8 @@ class SignedCommandsMixin:
       self,
   ) -> None:
     """Deletes all signed command from the database."""
-    to_delete = self.ReadSignedCommands()
-    if not to_delete:
-      return
 
     def Mutation(mut) -> None:
-      for command in to_delete:
-        mut.delete("SignedCommands", spanner_lib.KeySet(keys=[[command.id, int(command.operating_system)]]))
+      mut.delete("SignedCommands", spanner_lib.KeySet(all_=True))
 
     self.db.Mutate(Mutation, txn_tag="DeleteAllSignedCommands")

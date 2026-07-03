@@ -3,6 +3,7 @@
 
 from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 import dataclasses
+import datetime
 import logging
 import random
 import threading
@@ -274,7 +275,9 @@ class FlowsMixin:
     row["Creator"] = flow_obj.creator
     row["Name"] = flow_obj.flow_class_name
     row["State"] = int(flow_obj.flow_state)
-    row["NextRequestToProcess"] = flow_obj.next_request_to_process
+    # NextRequestToProcess is a STRING column, so the value is converted
+    # explicitly instead of relying on the wire encoding of INT64.
+    row["NextRequestToProcess"] = str(flow_obj.next_request_to_process)
 
     row["CreationTime"] = spanner_lib.COMMIT_TIMESTAMP
     row["UpdateTime"] = spanner_lib.COMMIT_TIMESTAMP
@@ -314,7 +317,7 @@ class FlowsMixin:
     except AlreadyExists as error:
       raise db.FlowExistsError(client_id, flow_id) from error
     except Exception as error:
-      if "Parent row for row [" in str(error):
+      if spanner_utils.IsMissingParentRowError(error):
         raise db.UnknownClientError(client_id)
       else:
         raise
@@ -467,7 +470,7 @@ class FlowsMixin:
     if isinstance(client_crash_info, jobs_pb2.ClientCrash):
       row["Crash"] = client_crash_info
     if (
-        isinstance(processing_on, str) and processing_on is not db.UNCHANGED
+        isinstance(processing_on, str) and processing_on is not _UNCHANGED
     ) or processing_on is None:
       row["ProcessingWorker"] = processing_on
     if isinstance(processing_since, rdfvalue.RDFDatetime):
@@ -502,7 +505,7 @@ class FlowsMixin:
         rows.append([
             r.client_id,
             r.flow_id,
-            r.hunt_id if r.hunt_id else "0",
+            r.hunt_id if r.hunt_id else None,
             rdfvalue.RDFDatetime.Now().AsDatetime(),
             str(uuid.uuid4()),
             r.tag,
@@ -530,7 +533,7 @@ class FlowsMixin:
       for r in errors:
         rows.append([r.client_id,
                      r.flow_id,
-                     r.hunt_id if r.hunt_id else "0",
+                     r.hunt_id if r.hunt_id else None,
                      rdfvalue.RDFDatetime.Now().AsDatetime(),
                      str(uuid.uuid4()),
                      r.payload,
@@ -821,14 +824,24 @@ class FlowsMixin:
       # uniquifier which is not part of the FlowProcessingRequest proto, so
       # rows are addressed by their (ClientId, FlowId, CreationTime) key
       # prefix using ranges.
+      #
+      # The creation time travels through the request proto with microsecond
+      # precision while Spanner timestamps have nanosecond precision. Deleting
+      # the half-open range [t, t + 1us) therefore also matches rows whose
+      # stored timestamp has a sub-microsecond component that got truncated
+      # on read - otherwise such requests would never be acknowledged and
+      # would be re-processed forever.
       ranges = []
       for request in requests:
         creation_time = rdfvalue.RDFDatetime.FromMicrosecondsSinceEpoch(
           request.creation_time
         ).AsDatetime()
-        key_prefix = [request.client_id, request.flow_id, creation_time]
+        next_micro = creation_time + datetime.timedelta(microseconds=1)
         ranges.append(
-            spanner_lib.KeyRange(start_closed=key_prefix, end_closed=key_prefix)
+            spanner_lib.KeyRange(
+                start_closed=[request.client_id, request.flow_id, creation_time],
+                end_open=[request.client_id, request.flow_id, next_micro],
+            )
         )
       keyset = spanner_lib.KeySet(ranges=ranges)
       txn.delete(table="FlowProcessingRequests", keyset=keyset)
@@ -1047,7 +1060,7 @@ class FlowsMixin:
     try:
       self.db.Transact(Txn, txn_tag="WriteFlowRequests")
     except NotFound as error:
-      if "Parent row for row [" in str(error):
+      if spanner_utils.IsMissingParentRowError(error):
         raise db.AtLeastOneUnknownFlowError(flow_keys, cause=error)
       else:
         raise
@@ -1334,31 +1347,35 @@ class FlowsMixin:
     if not request_keys:
       return {}
 
-    conditions = []
-    params = {}
-    for i, req_key in enumerate(request_keys):
-      if i > 0:
-        conditions.append("OR")
+    # A single array-of-struct parameter is used instead of one OR-ed
+    # condition (with three parameters) per request key: the query text stays
+    # constant (plan cache friendly) and the number of request keys is not
+    # limited by Spanner's per-query parameter limit.
+    params = {
+        "request_keys": [
+            [req_key.client_id, req_key.flow_id, str(req_key.request_id)]
+            for req_key in request_keys
+        ],
+    }
+    param_type = {
+        "request_keys": param_types.Array(
+            param_types.Struct([
+                param_types.StructField("ClientId", param_types.STRING),
+                param_types.StructField("FlowId", param_types.STRING),
+                param_types.StructField("RequestId", param_types.STRING),
+            ])
+        ),
+    }
 
-      conditions.append(f"""
-         (fr.ClientId = {{client_id_{i}}} AND
-         fr.FlowId = {{flow_id_{i}}} AND
-         fr.RequestId = {{request_id_{i}}})
-      """)
-
-      params[f"client_id_{i}"] = req_key.client_id
-      params[f"flow_id_{i}"] = req_key.flow_id
-      params[f"request_id_{i}"] = str(req_key.request_id)
-
-    query = f"""
+    query = """
     SELECT fr.ClientId, fr.FlowId, fr.RequestId, COUNT(*) AS ResponseCount
     FROM FlowResponses as fr
-    WHERE {" ".join(conditions)}
+    WHERE (fr.ClientId, fr.FlowId, fr.RequestId) IN UNNEST({request_keys})
     GROUP BY fr.ClientID, fr.FlowID, fr.RequestID
     """
 
     result = {}
-    for row in self.db.ParamQuery(query, params):
+    for row in self.db.ParamQuery(query, params, param_type=param_type):
       client_id, flow_id, request_id, count = row
 
       req_key = _RequestKey(
@@ -1885,6 +1902,7 @@ class FlowsMixin:
       params["substring"] = with_substring
 
     query += """
+     ORDER BY l.CreationTime ASC
      LIMIT {count}
     OFFSET {offset}
     """
@@ -1981,7 +1999,9 @@ class FlowsMixin:
     WHERE
       l.ClientId = {client_id} AND l.FlowId = {flow_id}
     ORDER BY
-      l.RequestId, l.ResponseId
+      -- The id columns hold string-encoded integers, so they have to be cast
+      -- for ordering: lexicographically '10' would sort before '2'.
+      CAST(l.RequestId AS INT64), CAST(l.ResponseId AS INT64)
     LIMIT
       {count}
     OFFSET
@@ -2072,6 +2092,7 @@ class FlowsMixin:
       params["type"] = int(with_type)
 
     query += """
+     ORDER BY l.CreationTime ASC
      LIMIT {count}
     OFFSET {offset}
     """
@@ -2156,9 +2177,11 @@ class FlowsMixin:
     try:
       self.db.InsertOrUpdate(table="ScheduledFlows", row=row, txn_tag="WriteScheduledFlow")
     except Exception as error:
-      if "Parent row for row [" in str(error):
+      if spanner_utils.IsMissingParentRowError(error):
         raise db.UnknownClientError(scheduled_flow.client_id) from error
-      elif "fk_creator_users_username" in str(error):
+      elif spanner_utils.IsConstraintViolatedError(
+          error, "fk_creator_users_username"
+      ):
         raise db.UnknownGRRUserError(scheduled_flow.creator) from error
       else:
         raise
@@ -2519,7 +2542,7 @@ class FlowsMixin:
       try:
         row = txn.read(
             table="FlowRequests",
-            keyset=spanner_lib.KeySet(keys=[[flow_obj.client_id, flow_obj.flow_id, flow_obj.next_request_to_process]]),
+            keyset=spanner_lib.KeySet(keys=[[flow_obj.client_id, flow_obj.flow_id, str(flow_obj.next_request_to_process)]]),
             columns=["NeedsProcessing", "StartTime"]
         ).one()
         if row[0]:
@@ -2543,7 +2566,7 @@ class FlowsMixin:
                    int(flow_obj.flow_state), float(flow_obj.cpu_time_used.user_cpu_time),
                    float(flow_obj.cpu_time_used.system_cpu_time),
                    int(flow_obj.network_bytes_sent), None, None, None,
-                   flow_obj.next_request_to_process,
+                   str(flow_obj.next_request_to_process),
                    spanner_lib.COMMIT_TIMESTAMP,
                    flow_obj.num_replies_sent,
           ]]

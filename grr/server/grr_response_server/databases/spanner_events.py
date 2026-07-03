@@ -61,6 +61,8 @@ class EventsMixin:
     if conditions:
       query += " WHERE " + " AND ".join(conditions)
 
+    query += " ORDER BY a.CreationTime ASC"
+
     result = []
     for (
         username,
@@ -141,6 +143,8 @@ class EventsMixin:
           entry.timestamp
       ).AsDatetime()
 
-    self.db.InsertOrUpdate(
+    # A plain insert is used on purpose: an audit entry must never silently
+    # overwrite an existing one.
+    self.db.Insert(
         table="ApiAuditEntry", row=row, txn_tag="WriteAPIAuditEntry"
     )

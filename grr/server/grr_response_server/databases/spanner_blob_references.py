@@ -16,7 +16,11 @@ class BlobReferencesMixin:
   """A Spanner database mixin with implementation of blob references methods."""
 
   db: spanner_utils.Database
-  BATCH_SIZE = 16000
+
+  # Every batch entry produces one range delete plus one insert (4 cells) per
+  # blob reference, so the batch size must leave ample headroom below
+  # Spanner's per-commit mutation limit even for hashes with many references.
+  BATCH_SIZE = 2000
 
   @db_utils.CallLogged
   @db_utils.CallAccounted

@@ -2,7 +2,6 @@
 """A module with client methods of the Spanner database implementation."""
 
 from collections.abc import Collection, Iterator, Mapping, Sequence
-import datetime
 from typing import Optional
 
 from google.api_core.exceptions import NotFound
@@ -161,10 +160,11 @@ class ClientsMixin:
     try:
       self.db.Mutate(Mutation, txn_tag="MultiAddClientLabels")
     except Exception as error:
-      message = str(error)
-      if "Parent row for row [" in message:
+      if spanner_utils.IsMissingParentRowError(error):
         raise db_lib.AtLeastOneUnknownClientError(client_ids) from error
-      elif "fk_client_label_owner_username" in message:
+      elif spanner_utils.IsConstraintViolatedError(
+          error, "fk_client_label_owner_username"
+      ):
         raise db_lib.UnknownGRRUserError(username=owner, cause=error)
       else:
         raise
@@ -277,23 +277,34 @@ class ClientsMixin:
 
     result = {client_id: None for client_id in client_ids}
 
+    # The startup is joined on the snapshot's creation time (both are written
+    # in the same commit), so the snapshot is returned with the startup
+    # information recorded at snapshot time - not with whatever startup
+    # happens to be the latest. LEFT JOINs make sure a snapshot is returned
+    # even if its startup row is missing.
     query = """
     SELECT c.ClientId, ss.CreationTime, ss.Snapshot, su.Startup
-      FROM Clients AS c, ClientSnapshots AS ss, ClientStartups AS su
+      FROM Clients AS c
+           LEFT JOIN ClientSnapshots AS ss
+                  ON ss.ClientId = c.ClientId
+                 AND ss.CreationTime = c.LastSnapshotTime
+           LEFT JOIN ClientStartups AS su
+                  ON su.ClientId = c.ClientId
+                 AND su.CreationTime = c.LastSnapshotTime
      WHERE c.ClientId IN UNNEST({client_ids})
-       AND ss.ClientId = c.ClientId
-       AND ss.CreationTime = c.LastSnapshotTime
-       AND su.ClientId = c.ClientId
-       AND su.CreationTime = c.LastStartupTime
     """
     for row in self.db.ParamQuery(
         query, {"client_ids": client_ids}, txn_tag="MultiReadClientSnapshot"
     ):
       client_id, creation_time, snapshot_bytes, startup_bytes = row
 
+      if snapshot_bytes is None:
+        continue
+
       snapshot = objects_pb2.ClientSnapshot()
       snapshot.ParseFromString(snapshot_bytes)
-      snapshot.startup_info.ParseFromString(startup_bytes)
+      if startup_bytes is not None:
+        snapshot.startup_info.ParseFromString(startup_bytes)
       snapshot.timestamp = int(rdfvalue.RDFDatetime.FromDatetime(creation_time))
 
       result[client_id] = snapshot
@@ -314,10 +325,11 @@ class ClientsMixin:
 
     query = """
     SELECT ss.CreationTime, ss.Snapshot, su.Startup
-      FROM ClientSnapshots AS ss, ClientStartups AS su
+      FROM ClientSnapshots AS ss
+           LEFT JOIN ClientStartups AS su
+                  ON ss.ClientId = su.ClientId
+                 AND ss.CreationTime = su.CreationTime
      WHERE ss.ClientId = {client_id}
-       AND ss.ClientId = su.ClientId
-       AND ss.CreationTime = su.CreationTime
     """
     params = {"client_id": client_id}
 
@@ -339,7 +351,8 @@ class ClientsMixin:
 
       snapshot = objects_pb2.ClientSnapshot()
       snapshot.ParseFromString(snapshot_bytes)
-      snapshot.startup_info.ParseFromString(startup_bytes)
+      if startup_bytes is not None:
+        snapshot.startup_info.ParseFromString(startup_bytes)
       snapshot.timestamp = int(rdfvalue.RDFDatetime.FromDatetime(creation_time))
 
       result.append(snapshot)
@@ -838,8 +851,3 @@ class ClientsMixin:
         key=(client_id, keyword),
         txn_tag="RemoveClientKeyword",
     )
-
-
-_EPOCH = datetime.datetime.fromtimestamp(0, datetime.timezone.utc)
-
-_DELETE_BATCH_SIZE = 5_000

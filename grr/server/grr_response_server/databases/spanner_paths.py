@@ -6,6 +6,7 @@ from typing import Optional
 
 from google.api_core.exceptions import NotFound
 from google.cloud import spanner as spanner_lib
+from google.cloud.spanner_v1 import param_types
 
 from grr_response_core.lib import rdfvalue
 from grr_response_proto import objects_pb2
@@ -96,7 +97,7 @@ class PathsMixin:
     try:
       self.db.Mutate(Mutation, txn_tag="WritePathInfos")
     except NotFound as error:
-      if "Parent row for row [" in str(error):
+      if spanner_utils.IsMissingParentRowError(error):
         raise abstract_db.UnknownClientError(client_id) from error
       else:
         raise
@@ -506,20 +507,30 @@ class PathsMixin:
     if not client_paths:
       return {}
 
-    params = {}
-
-    key_clauses = []
-    for idx, client_path in enumerate(client_paths):
-      client_id = client_path.client_id
-
-      key_clauses.append(f"""(
-          h.ClientId = {{client_id_{idx}}}
-      AND h.Type = {{type_{idx}}}
-      AND h.Path = {{path_{idx}}}
-      )""")
-      params[f"client_id_{idx}"] = client_id
-      params[f"type_{idx}"] = int(client_path.path_type)
-      params[f"path_{idx}"] = EncodePathComponents(client_path.components)
+    # A single array-of-struct parameter is used instead of one OR-ed clause
+    # (with three parameters) per path: the query text stays constant and the
+    # number of paths is not limited by Spanner's per-query parameter limit.
+    # The proto enum Type column has to be cast for the comparison with the
+    # INT64 struct field.
+    params = {
+        "client_paths": [
+            [
+                client_path.client_id,
+                int(client_path.path_type),
+                EncodePathComponents(client_path.components),
+            ]
+            for client_path in client_paths
+        ],
+    }
+    param_type = {
+        "client_paths": param_types.Array(
+            param_types.Struct([
+                param_types.StructField("ClientId", param_types.STRING),
+                param_types.StructField("PathType", param_types.INT64),
+                param_types.StructField("Path", param_types.BYTES),
+            ])
+        ),
+    }
 
     if max_timestamp is not None:
       params["cutoff"] = max_timestamp.AsDatetime()
@@ -533,7 +544,8 @@ class PathsMixin:
                    FROM PathFileHashes AS h
                         INNER JOIN HashBlobReferences AS b
                                 ON h.FileHash.sha256 = b.HashId
-                  WHERE ({" OR ".join(key_clauses)})
+                  WHERE (h.ClientId, CAST(h.Type AS INT64), h.Path)
+                        IN UNNEST({{client_paths}})
                     AND {cutoff_clause}
                   GROUP BY h.ClientId, h.Type, h.Path)
     SELECT l.ClientId, l.Type, l.Path, l.LastCreationTime,
@@ -554,7 +566,8 @@ class PathsMixin:
     results = {client_path: None for client_path in client_paths}
 
     for row in self.db.ParamQuery(
-        query, params, txn_tag="ReadLatestPathInfosWithHashBlobReferences"
+        query, params, param_type=param_type,
+        txn_tag="ReadLatestPathInfosWithHashBlobReferences"
     ):
       client_id, int_type, path, creation_time, *row = row
       stat_bytes, hash_bytes = row
