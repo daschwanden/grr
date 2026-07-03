@@ -141,12 +141,15 @@ class Database:
       txn_tag: Spanner transaction tag.
 
     Returns:
-      A cursor over the query results.
+      The rows of the query result.
     """
+    # Results must be fully consumed before the snapshot context is exited:
+    # on exit the session is returned to the pool and may be picked up by
+    # another thread, while the streaming RPC of an unconsumed result set
+    # would still be using it.
     with self._pyspanner.snapshot() as snapshot:
       results = snapshot.execute_sql(query, request_options={"request_tag": txn_tag})
-
-    return results
+      return list(results)
 
   def QuerySingle(self, query: str, txn_tag: Optional[str] = None) -> Row:
     """Queries PySpanner for a single row using the given query string.
@@ -162,7 +165,9 @@ class Database:
       NotFound: If the query did not return any results.
       ValueError: If the query yielded more than one result.
     """
-    return self.Query(query, txn_tag=txn_tag).one()
+    with self._pyspanner.snapshot() as snapshot:
+      results = snapshot.execute_sql(query, request_options={"request_tag": txn_tag})
+      return results.one()
 
   def ParamQuery(
       self, query: str, params: Mapping[str, Any],
@@ -193,18 +198,7 @@ class Database:
       ValueError: If the query contains disallowed sequences.
       KeyError: If some parameter is not specified.
     """
-    if not param_type:
-      param_type = {}
-    names, _ = collection.Unzip(params.items())
-    query = self._parametrize(query, names)
-
-    for key, value in params.items():
-      if key not in param_type:
-        try:
-          param_type[key] = self._get_param_type(value)
-        except TypeError as e:
-          print(f"Warning for key '{key}': {e}. Setting type to None.")
-          param_type[key] = None # Or re-raise, or handle differently
+    query, param_type = self._PrepareParamQuery(query, params, param_type)
 
     with self._pyspanner.snapshot() as snapshot:
       results = snapshot.execute_sql(
@@ -213,8 +207,36 @@ class Database:
           param_types=param_type,
           request_options={"request_tag": txn_tag}
       )
+      return list(results)
 
-    return results
+  def _PrepareParamQuery(
+      self, query: str, params: Mapping[str, Any],
+      param_type: Optional[dict] = None
+  ) -> Tuple[str, dict]:
+    """Substitutes parameter placeholders and infers missing param types.
+
+    Args:
+      query: An SQL string with parameter placeholders.
+      params: A dictionary mapping parameter name to a value.
+      param_type: An optional dictionary with explicit parameter types. It is
+        not modified; missing entries are inferred from the values.
+
+    Returns:
+      A tuple of the parametrized query and the complete param type mapping.
+    """
+    names, _ = collection.Unzip(params.items())
+    query = self._parametrize(query, names)
+
+    param_type = dict(param_type) if param_type else {}
+    for key, value in params.items():
+      if key not in param_type:
+        try:
+          param_type[key] = self._get_param_type(value)
+        except TypeError as e:
+          print(f"Warning for key '{key}': {e}. Setting type to None.")
+          param_type[key] = None # Or re-raise, or handle differently
+
+    return query, param_type
 
   def ParamQuerySingle(
       self, query: str, params: Mapping[str, Any],
@@ -239,7 +261,16 @@ class Database:
       ValueError: If the query contains disallowed sequences.
       KeyError: If some parameter is not specified.
     """
-    return self.ParamQuery(query, params, param_type=param_type, txn_tag=txn_tag).one()
+    query, param_type = self._PrepareParamQuery(query, params, param_type)
+
+    with self._pyspanner.snapshot() as snapshot:
+      results = snapshot.execute_sql(
+          query,
+          params=params,
+          param_types=param_type,
+          request_options={"request_tag": txn_tag}
+      )
+      return results.one()
 
   def ParamExecute(
       self, query: str, params: Mapping[str, Any], txn_tag: Optional[str] = None
@@ -438,7 +469,7 @@ class Database:
           keyset=keyset,
           request_options={"request_tag": txn_tag}
       )
-    return results.one()
+      return results.one()
 
   def ReadSet(
       self,
@@ -465,4 +496,4 @@ class Database:
           keyset=rows,
           request_options={"request_tag": txn_tag}
       )
-    return results
+      return list(results)
