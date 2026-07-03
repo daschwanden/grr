@@ -4,6 +4,7 @@
 from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 import dataclasses
 import logging
+import random
 import threading
 import time
 from typing import Any, Optional, Union
@@ -36,6 +37,15 @@ _MESSAGE_HANDLER_MAX_ACTIVE_CALLBACKS = 20
 
 _MILLISECONDS = 1000
 _SECONDS = 1000 * _MILLISECONDS
+
+
+def _JitteredSleep(base_seconds: float) -> None:
+  """Sleeps for the given duration randomized by +/- 50%.
+
+  Randomizing the queue poll intervals desynchronizes the workers so that they
+  do not all scan (and attempt to lease) the same rows at the same time.
+  """
+  time.sleep(base_seconds * (0.5 + random.random()))
 
 @dataclasses.dataclass(frozen=True)
 class _FlowKey:
@@ -856,7 +866,8 @@ class FlowsMixin:
       }
       requests = txn.execute_sql(
               "SELECT RequestId, CreationTime, Payload "
-              "FROM FlowProcessingRequests "
+              "FROM FlowProcessingRequests"
+              "@{FORCE_INDEX=FlowProcessingRequestsByLease} "
               "WHERE "
               " (DeliveryTime IS NULL OR DeliveryTime <= @now) AND "
               " (LeasedUntil IS NULL OR LeasedUntil < @now) "
@@ -874,6 +885,11 @@ class FlowsMixin:
         ).AsMicrosecondsSinceEpoch()
         res.append(req)
         request_ids.append(request_id)
+
+      # Nothing to lease - skip the update to avoid a pointless DML round
+      # trip on every poll.
+      if not request_ids:
+        return res
 
       query = (
         "UPDATE FlowProcessingRequests "
@@ -908,7 +924,7 @@ class FlowsMixin:
       thread_pool = self.flow_processing_request_handler_pool
       free_threads = thread_pool.max_threads - thread_pool.busy_threads
       if free_threads == 0:
-        time.sleep(self._FLOW_REQUEST_POLL_TIME_SECS)
+        _JitteredSleep(self._FLOW_REQUEST_POLL_TIME_SECS)
         continue
       try:
         msgs = self._LeaseFlowProcessingRequests(free_threads)
@@ -918,11 +934,11 @@ class FlowsMixin:
                 target=handler, args=(m,)
             )
         else:
-          time.sleep(self._FLOW_REQUEST_POLL_TIME_SECS)
+          _JitteredSleep(self._FLOW_REQUEST_POLL_TIME_SECS)
 
       except Exception as e:  # pylint: disable=broad-except
         logging.exception("_FlowProcessingRequestHandlerLoop raised %s.", e)
-        time.sleep(self._FLOW_REQUEST_POLL_TIME_SECS)
+        _JitteredSleep(self._FLOW_REQUEST_POLL_TIME_SECS)
 
     self.flow_processing_request_handler_pool.Stop()
 
@@ -2258,9 +2274,12 @@ class FlowsMixin:
         if msgs:
           handler(msgs)
         else:
-          time.sleep(self._MESSAGE_HANDLER_POLL_TIME_SECS)
+          _JitteredSleep(self._MESSAGE_HANDLER_POLL_TIME_SECS)
       except Exception as e:  # pylint: disable=broad-except
         logging.exception("_LeaseMessageHandlerRequests raised %s.", e)
+        # Sleeping here prevents a persistent database error from turning
+        # this loop into a busy spin.
+        _JitteredSleep(self._MESSAGE_HANDLER_POLL_TIME_SECS)
 
   def _LeaseMessageHandlerRequests(
       self,
@@ -2286,7 +2305,8 @@ class FlowsMixin:
       }
       requests = txn.execute_sql(
               "SELECT RequestId, CreationTime, Payload "
-              "FROM MessageHandlerRequests "
+              "FROM MessageHandlerRequests"
+              "@{FORCE_INDEX=MessageHandlerRequestsByLease} "
               "WHERE LeasedUntil IS NULL OR LeasedUntil < @now "
               "LIMIT @limit",
               params=params,
@@ -2296,13 +2316,18 @@ class FlowsMixin:
       for request_id, creation_time, request in requests:
         req = objects_pb2.MessageHandlerRequest()
         req.ParseFromString(request)
-        req.timestamp = req.leased_until = rdfvalue.RDFDatetime.FromDatetime(
+        req.timestamp = rdfvalue.RDFDatetime.FromDatetime(
           creation_time
         ).AsMicrosecondsSinceEpoch()
         req.leased_until = leased_until
         req.leased_by = leased_by
         res.append(req)
         request_ids.append(request_id)
+
+      # Nothing to lease - skip the update to avoid a pointless DML round
+      # trip on every poll.
+      if not request_ids:
+        return res
 
       query = (
         "UPDATE MessageHandlerRequests "
@@ -2407,7 +2432,15 @@ class FlowsMixin:
   ) -> flows_pb2.Flow:
     """Marks a flow as being processed on this worker and returns it."""
 
+    # The transaction object of every attempt is recorded so that the commit
+    # timestamp of the successful attempt can be read after the transaction
+    # runner returns.
+    txn_attempts = []
+
     def Txn(txn) -> flows_pb2.Flow:
+      txn_attempts.clear()
+      txn_attempts.append(txn)
+
       try:
         row = txn.read(
             table="Flows",
@@ -2436,7 +2469,10 @@ class FlowsMixin:
             )
         )
 
-      if flow.parent_hunt_id is not None:
+      # Note: proto3 string fields are never None, so an explicit truthiness
+      # check is required - otherwise flows without a parent hunt would cause
+      # a pointless read of the Hunts table with an empty key on every lease.
+      if flow.parent_hunt_id:
         hunt_state = self._ReadHuntState(txn, flow.parent_hunt_id)
         if (
             hunt_state is not None
@@ -2463,21 +2499,15 @@ class FlowsMixin:
 
       return flow
 
-    def Txn2(txn) -> flows_pb2.Flow:
-      try:
-        row = txn.read(
-            table="Flows",
-            keyset=spanner_lib.KeySet(keys=[[client_id, flow_id]]),
-            columns=_READ_FLOW_OBJECT_COLS
-        ).one()
-        flow = _ParseReadFlowObjectRow(client_id, flow_id, row)
-      except NotFound as error:
-        raise db.UnknownFlowError(client_id, flow_id, cause=error)
-      return flow
-
     leased_flow = self.db.Transact(Txn, txn_tag="LeaseFlowForProcessing")
-    flow = self.db.Transact(Txn2, txn_tag="LeaseFlowForProcessing2")
-    leased_flow.processing_since = flow.processing_since
+
+    # ProcessingStartTime was written with the commit timestamp, so the commit
+    # timestamp of the lease transaction is the processing_since time of the
+    # flow. Reading it from the transaction avoids a second round trip that
+    # would only read the value back.
+    leased_flow.processing_since = int(
+        rdfvalue.RDFDatetime.FromDatetime(txn_attempts[0].committed)
+    )
     return leased_flow
 
   @db_utils.CallLogged

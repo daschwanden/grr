@@ -17,6 +17,13 @@ from grr_response_server.databases import spanner_utils
 
 _UNCHANGED = db.Database.UNCHANGED
 
+_CRON_JOBS_SELECT_QUERY = """
+    SELECT cj.Job, cj.JobId, cj.CreationTime, cj.Enabled,
+           cj.ForcedRunRequested, cj.LastRunStatus, cj.LastRunTime,
+           cj.CurrentRunId, cj.State, cj.LeaseEndTime, cj.LeaseOwner
+      FROM CronJobs as cj
+    """
+
 
 class CronJobsMixin:
   """A Spanner database mixin with implementation of cronjobs."""
@@ -68,16 +75,17 @@ class CronJobsMixin:
       UnknownCronJobError: A cron job for at least one of the given ids
                            does not exist.
     """
-    where_ids = ""
+    # This is a pure read, so a (read-only) snapshot query is used instead of
+    # a read-write transaction that would take locks on the read rows.
+    query = _CRON_JOBS_SELECT_QUERY
     params = {}
     if cronjob_ids:
-      where_ids = " WHERE cj.JobId IN UNNEST(@cronjob_ids)"
-      params["cronjob_ids"] = cronjob_ids
+      query += " WHERE cj.JobId IN UNNEST({cronjob_ids})"
+      params["cronjob_ids"] = list(cronjob_ids)
 
-    def Transaction(txn) -> Sequence[flows_pb2.CronJob]:
-      return self._SelectCronJobsWith(txn, where_ids, params)
-
-    res = self.db.Transact(Transaction, txn_tag="ReadCronJobs")
+    res = _CronJobsFromRows(
+        self.db.ParamQuery(query, params, txn_tag="ReadCronJobs")
+    )
 
     if cronjob_ids and len(res) != len(cronjob_ids):
       missing = set(cronjob_ids) - set([c.cron_job_id for c in res])
@@ -589,48 +597,47 @@ class CronJobsMixin:
       A list of CronJobs read from the database.
     """
 
-    query = """
-    SELECT cj.Job, cj.JobId, cj.CreationTime, cj.Enabled,
-           cj.ForcedRunRequested, cj.LastRunStatus, cj.LastRunTime,
-           cj.CurrentRunId, cj.State, cj.LeaseEndTime, cj.LeaseOwner
-      FROM CronJobs as cj
-    """
-    query += where_clause
+    query = _CRON_JOBS_SELECT_QUERY + where_clause
 
     response = txn.execute_sql(sql=query, params=params)
 
-    res = []
-    for row in response:
-      (
-          job,
-          job_id,
-          creation_time,
-          enabled,
-          forced_run_requested,
-          last_run_status,
-          last_run_time,
-          current_run_id,
-          state,
-          lease_end_time,
-          lease_owner,
-      ) = row
-      res.append(
-          _CronJobFromRow(
-              job=job,
-              job_id=job_id,
-              creation_time=creation_time,
-              enabled=enabled,
-              forced_run_requested=forced_run_requested,
-              last_run_status=last_run_status,
-              last_run_time=last_run_time,
-              current_run_id=current_run_id,
-              state=state,
-              lease_end_time=lease_end_time,
-              lease_owner=lease_owner,
-          )
-      )
+    return _CronJobsFromRows(response)
 
-    return res
+
+def _CronJobsFromRows(rows) -> Sequence[flows_pb2.CronJob]:
+  """Converts rows of the cron jobs select query into CronJob objects."""
+  res = []
+  for row in rows:
+    (
+        job,
+        job_id,
+        creation_time,
+        enabled,
+        forced_run_requested,
+        last_run_status,
+        last_run_time,
+        current_run_id,
+        state,
+        lease_end_time,
+        lease_owner,
+    ) = row
+    res.append(
+        _CronJobFromRow(
+            job=job,
+            job_id=job_id,
+            creation_time=creation_time,
+            enabled=enabled,
+            forced_run_requested=forced_run_requested,
+            last_run_status=last_run_status,
+            last_run_time=last_run_time,
+            current_run_id=current_run_id,
+            state=state,
+            lease_end_time=lease_end_time,
+            lease_owner=lease_owner,
+        )
+    )
+
+  return res
 
 
 def _CronJobFromRow(

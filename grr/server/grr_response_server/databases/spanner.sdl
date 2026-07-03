@@ -673,3 +673,6 @@ CREATE TABLE FlowProcessingRequests(
 
 CREATE INDEX FlowProcessingRequestsIds
   ON FlowProcessingRequests(RequestId);
+
+CREATE INDEX FlowProcessingRequestsByLease
+  ON FlowProcessingRequests(LeasedUntil, DeliveryTime);
