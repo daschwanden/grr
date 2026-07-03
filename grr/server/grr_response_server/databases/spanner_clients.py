@@ -709,10 +709,19 @@ class ClientsMixin:
     """
     result = {}
 
-    query = """
+    if min_last_ping_time is not None:
+      # A lower bound on the ping time is typically highly selective (e.g.
+      # "clients seen within the last hour"), so the ping time index is
+      # forced. Without a ping lower bound most of the table matches anyway,
+      # so paging through the base table is the right choice there.
+      table_expr = "Clients@{{FORCE_INDEX=ClientsByLastPingTime}}"
+    else:
+      table_expr = "Clients"
+
+    query = f"""
     SELECT c.ClientId, c.LastPingTime
-      FROM Clients AS c
-     WHERE c.ClientId > {last_client_id}
+      FROM {table_expr} AS c
+     WHERE c.ClientId > {{last_client_id}}
     """
     params = {"last_client_id": last_client_id}
 

@@ -285,8 +285,8 @@ class UsersMixin:
     """Reads approval requests of a given type for a given user."""
     requests = []
 
-    # We need to use double curly braces for parameters as we also parametrize
-    # over index that is substituted using standard Python templating.
+    # We need to use double curly braces for parameters as we also substitute
+    # the index hint using standard Python templating first.
     query = """
       SELECT r.ApprovalId,
              r.SubjectClientId, r.SubjectHuntId, r.SubjectCronJobId,
@@ -298,42 +298,44 @@ class UsersMixin:
                      FROM ApprovalGrants AS g
                     WHERE g.Requestor = r.Requestor
                       AND g.ApprovalId = r.ApprovalId) AS Grants
-        FROM ApprovalRequests@{{{{FORCE_INDEX={index}}}}} AS r
+        FROM ApprovalRequests{index_hint} AS r
        WHERE r.Requestor = {{requestor}}
     """
     params = {
         "requestor": username,
     }
 
-    # By default we use the "by requestor" index but in case a specific subject
-    # is given we can also use a more specific index (overridden below).
-    index = "ApprovalRequestsByRequestor"
+    # The table's primary key already starts with Requestor, so plain
+    # per-requestor listing needs no index. In case a specific subject is
+    # given, a more specific (null-filtered) index is used instead
+    # (overridden below).
+    index_hint = ""
 
     if typ == _APPROVAL_TYPE_CLIENT:
       query += " AND r.SubjectClientId IS NOT NULL"
       if subject_id is not None:
         query += " AND r.SubjectClientId = {{subject_client_id}}"
         params["subject_client_id"] = subject_id
-        index = "ApprovalRequestsByRequestorSubjectClientId"
+        index_hint = "@{{FORCE_INDEX=ApprovalRequestsByRequestorSubjectClientId}}"
     elif typ == _APPROVAL_TYPE_HUNT:
       query += " AND r.SubjectHuntId IS NOT NULL"
       if subject_id is not None:
         query += " AND r.SubjectHuntId = {{subject_hunt_id}}"
         params["subject_hunt_id"] = subject_id
-        index = "ApprovalRequestsByRequestorSubjectHuntId"
+        index_hint = "@{{FORCE_INDEX=ApprovalRequestsByRequestorSubjectHuntId}}"
     elif typ == _APPROVAL_TYPE_CRON_JOB:
       query += " AND r.SubjectCronJobId IS NOT NULL"
       if subject_id is not None:
         query += " AND r.SubjectCronJobId = {{subject_cron_job_id}}"
         params["subject_cron_job_id"] = subject_id
-        index = "ApprovalRequestsByRequestorSubjectCronJobId"
+        index_hint = "@{{FORCE_INDEX=ApprovalRequestsByRequestorSubjectCronJobId}}"
     else:
       raise ValueError(f"Unsupported approval type: {typ}")
 
     if not include_expired:
       query += " AND r.ExpirationTime > CURRENT_TIMESTAMP()"
 
-    query = query.format(index=index)
+    query = query.format(index_hint=index_hint)
 
     for row in self.db.ParamQuery(
         query, params, txn_tag="ReadApprovalRequests"

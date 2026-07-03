@@ -166,6 +166,11 @@ CREATE TABLE Clients (
   FleetspeakValidationInfo `grr.FleetspeakValidationInfo`,
 ) PRIMARY KEY (ClientId);
 
+-- Not NULL_FILTERED: clients that never pinged (NULL LastPingTime) are
+-- explicitly matched by the max-bound ping queries.
+CREATE INDEX ClientsByLastPingTime
+  ON Clients(LastPingTime);
+
 CREATE TABLE ClientSnapshots(
   ClientId STRING(18) NOT NULL,
   CreationTime TIMESTAMP NOT NULL OPTIONS (allow_commit_timestamp = true),
@@ -235,16 +240,19 @@ CREATE TABLE ApprovalRequests(
                IF(SubjectCronJobId IS NOT NULL, 1, 0)) = 1),
 ) PRIMARY KEY (Requestor, ApprovalId);
 
-CREATE INDEX ApprovalRequestsByRequestor
-  ON ApprovalRequests(Requestor);
-
-CREATE INDEX ApprovalRequestsByRequestorSubjectClientId
+-- Note: an index on Requestor alone would be redundant as the table's
+-- primary key already starts with Requestor.
+--
+-- The subject indexes are NULL_FILTERED: exactly one of the three subject
+-- columns is set per row (see ck_subject_id_valid), so a plain index would
+-- consist of two thirds of NULL entries that no query ever looks at.
+CREATE NULL_FILTERED INDEX ApprovalRequestsByRequestorSubjectClientId
   ON ApprovalRequests(Requestor, SubjectClientId);
 
-CREATE INDEX ApprovalRequestsByRequestorSubjectHuntId
+CREATE NULL_FILTERED INDEX ApprovalRequestsByRequestorSubjectHuntId
   ON ApprovalRequests(Requestor, SubjectHuntId);
 
-CREATE INDEX ApprovalRequestsByRequestorSubjectCronJobId
+CREATE NULL_FILTERED INDEX ApprovalRequestsByRequestorSubjectCronJobId
   ON ApprovalRequests(Requestor, SubjectCronJobId);
 
 CREATE TABLE ApprovalGrants(
@@ -319,11 +327,15 @@ CREATE TABLE Flows(
 ) PRIMARY KEY (ClientId, FlowId),
   INTERLEAVE IN PARENT Clients ON DELETE CASCADE;
 
-CREATE INDEX FlowsByParentHuntIdFlowIdUpdateTime
+-- The hunt indexes on Flows are NULL_FILTERED: most flows do not belong to a
+-- hunt (NULL ParentHuntId) and all queries using these indexes filter on
+-- ParentHuntId equality, so indexing the NULL rows would only bloat the
+-- indexes and slow down every non-hunt flow write.
+CREATE NULL_FILTERED INDEX FlowsByParentHuntIdFlowIdUpdateTime
   ON Flows(ParentHuntId, FlowId, UpdateTime)
   STORING (State);
 
-CREATE INDEX FlowsByParentHuntIdFlowIdState
+CREATE NULL_FILTERED INDEX FlowsByParentHuntIdFlowIdState
   ON Flows(ParentHuntId, FlowId, State)
   STORING (ReplyCount, NetworkBytesSent, UserCpuTimeUsed, SystemCpuTimeUsed);
 
@@ -404,7 +416,7 @@ CREATE TABLE FlowLogEntries(
 ) PRIMARY KEY (ClientId, FlowId, CreationTime),
   INTERLEAVE IN PARENT Flows ON DELETE CASCADE;
 
-CREATE INDEX FlowLogEntriesByHuntIdCreationTime
+CREATE NULL_FILTERED INDEX FlowLogEntriesByHuntIdCreationTime
   ON FlowLogEntries(HuntId, CreationTime);
 
 CREATE TABLE FlowRRGLogs(
@@ -430,7 +442,7 @@ CREATE TABLE FlowOutputPluginLogEntries(
 ) PRIMARY KEY (ClientId, FlowId, OutputPluginId, CreationTime),
   INTERLEAVE IN PARENT Flows ON DELETE CASCADE;
 
-CREATE INDEX FlowOutputPluginLogEntriesByHuntIdCreationTime
+CREATE NULL_FILTERED INDEX FlowOutputPluginLogEntriesByHuntIdCreationTime
   ON FlowOutputPluginLogEntries(HuntId, CreationTime);
 
 CREATE TABLE ScheduledFlows(
