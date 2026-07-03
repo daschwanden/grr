@@ -1187,7 +1187,9 @@ class HuntsMixin:
         AND f.FlowId = f.ParentHuntID
       GROUP BY f.ParentHuntID, f.State
     """
-    counts_by_state_per_hunt = dict.fromkeys(hunt_ids, {})
+    # Note: dict.fromkeys() must not be used here as it would make all hunt
+    # ids share one single dict instance.
+    counts_by_state_per_hunt = {hunt_id: {} for hunt_id in hunt_ids}
     for hunt_id, state, count in self.db.ParamQuery(
         states_query, params, param_type=param_type, txn_tag="ReadHuntCounters_1"
     ):

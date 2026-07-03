@@ -486,7 +486,7 @@ class FlowsMixin:
 
     def Mutation(mut) -> None:
       rows = []
-      columns = ["ClientId", "FlowId", "HuntId", "CreationTime",
+      columns = ["ClientId", "FlowId", "HuntId", "CreationTime", "ResultId",
                  "Tag", "RdfType", "Payload"]
       for r in results:
         rows.append([
@@ -494,6 +494,7 @@ class FlowsMixin:
             r.flow_id,
             r.hunt_id if r.hunt_id else "0",
             rdfvalue.RDFDatetime.Now().AsDatetime(),
+            str(uuid.uuid4()),
             r.tag,
             db_utils.TypeURLToRDFTypeName(r.payload.type_url),
             r.payload,
@@ -515,12 +516,13 @@ class FlowsMixin:
     def Mutation(mut) -> None:
       rows = []
       columns = ["ClientId", "FlowId", "HuntId",
-                 "CreationTime", "Payload", "RdfType", "Tag"]
+                 "CreationTime", "ErrorId", "Payload", "RdfType", "Tag"]
       for r in errors:
         rows.append([r.client_id,
                      r.flow_id,
                      r.hunt_id if r.hunt_id else "0",
                      rdfvalue.RDFDatetime.Now().AsDatetime(),
+                     str(uuid.uuid4()),
                      r.payload,
                      db_utils.TypeURLToRDFTypeName(r.payload.type_url),
                      r.tag,
@@ -805,13 +807,20 @@ class FlowsMixin:
   ) -> None:
     """Deletes a list of flow processing requests from the database."""
     def Txn(txn) -> None:
-      keys = []
+      # The primary key of FlowProcessingRequests ends with a RequestId
+      # uniquifier which is not part of the FlowProcessingRequest proto, so
+      # rows are addressed by their (ClientId, FlowId, CreationTime) key
+      # prefix using ranges.
+      ranges = []
       for request in requests:
         creation_time = rdfvalue.RDFDatetime.FromMicrosecondsSinceEpoch(
           request.creation_time
         ).AsDatetime()
-        keys.append([request.client_id, request.flow_id, creation_time])
-      keyset = spanner_lib.KeySet(keys=keys)
+        key_prefix = [request.client_id, request.flow_id, creation_time]
+        ranges.append(
+            spanner_lib.KeyRange(start_closed=key_prefix, end_closed=key_prefix)
+        )
+      keyset = spanner_lib.KeySet(ranges=ranges)
       txn.delete(table="FlowProcessingRequests", keyset=keyset)
 
     self.db.Transact(Txn, txn_tag="AckFlowProcessingRequests")
@@ -1174,7 +1183,7 @@ class FlowsMixin:
                    str(r_key.request_id),
                    num_responses_expected,
       ])
-      txn.update(table="FlowRequests", columns=columns, values=rows)
+    txn.update(table="FlowRequests", columns=columns, values=rows)
 
   def _WriteFlowResponsesAndExpectedUpdates(
       self,
@@ -2357,7 +2366,7 @@ class FlowsMixin:
         req.leased_by = leased_by
       if leased_until is not None:
         req.leased_until = rdfvalue.RDFDatetime.FromDatetime(
-          creation_time
+          leased_until
       ).AsMicrosecondsSinceEpoch()
       results.append(req)
 

@@ -32,10 +32,14 @@ class CronJobsMixin:
       cronjob: A flows_pb2.CronJob object.
     """
     # We currently expect to reuse `created_at` if set.
-    rdf_created_at = rdfvalue.RDFDatetime().FromMicrosecondsSinceEpoch(
-        cronjob.created_at
-    )
-    creation_time = rdf_created_at.AsDatetime() or spanner_lib.COMMIT_TIMESTAMP
+    if cronjob.created_at:
+      creation_time = (
+          rdfvalue.RDFDatetime()
+          .FromMicrosecondsSinceEpoch(cronjob.created_at)
+          .AsDatetime()
+      )
+    else:
+      creation_time = spanner_lib.COMMIT_TIMESTAMP
 
     row = {
         "JobId": cronjob.cron_job_id,

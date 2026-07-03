@@ -454,6 +454,7 @@ class PathsMixin:
     SELECT s.Path, s.CreationTime, s.Stat,
            h.Path, h.CreationTime, h.FileHash
       FROM s FULL JOIN h ON s.Path = h.Path
+                        AND s.CreationTime = h.CreationTime
     """
 
     for row in self.db.ParamQuery(

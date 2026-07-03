@@ -509,8 +509,8 @@ class UsersMixin:
 
     query = f"""
       UPDATE UserNotifications n
-         SET n.State = {state}
-       WHERE n.Username = '{username}'
+         SET n.State = {{state}}
+       WHERE n.Username = {{username}}
          AND n.CreationTime IN ({param_placeholders})
     """
 

@@ -332,10 +332,11 @@ CREATE TABLE FlowResults(
   FlowId STRING(16) NOT NULL,
   HuntId STRING(16),
   CreationTime TIMESTAMP NOT NULL,
+  ResultId STRING(36) NOT NULL,
   Payload `google.protobuf.Any`,
   RdfType STRING(MAX),
   Tag STRING(MAX),
-) PRIMARY KEY (ClientId, FlowId, CreationTime),
+) PRIMARY KEY (ClientId, FlowId, CreationTime, ResultId),
   INTERLEAVE IN PARENT Flows ON DELETE CASCADE;
 
 CREATE INDEX FlowResultsByHuntIdCreationTime
@@ -350,10 +351,11 @@ CREATE TABLE FlowErrors(
   FlowId STRING(16) NOT NULL,
   HuntId STRING(16) NOT NULL,
   CreationTime TIMESTAMP NOT NULL,
+  ErrorId STRING(36) NOT NULL,
   Payload `google.protobuf.Any`,
   RdfType STRING(MAX),
   Tag STRING(MAX),
-) PRIMARY KEY (ClientId, FlowId, CreationTime),
+) PRIMARY KEY (ClientId, FlowId, CreationTime, ErrorId),
   INTERLEAVE IN PARENT Flows ON DELETE CASCADE;
 
 CREATE INDEX FlowErrorsByHuntIdFlowIdCreationTime
@@ -666,7 +668,7 @@ CREATE TABLE FlowProcessingRequests(
   LeasedUntil TIMESTAMP,
   LeasedBy STRING(128),
   Payload `grr.FlowProcessingRequest` NOT NULL,
-) PRIMARY KEY (ClientId, FlowId, CreationTime),
+) PRIMARY KEY (ClientId, FlowId, CreationTime, RequestId),
   INTERLEAVE IN PARENT Flows ON DELETE CASCADE;
 
 CREATE INDEX FlowProcessingRequestsIds
